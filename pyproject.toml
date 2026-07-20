@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "framelab"
+version = "0.1.0"
+description = "A desktop application for frame-accurate video inspection, trimming, slow-motion export, and frame extraction."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "opencv-python",
+    "Pillow",
+    "imageio-ffmpeg",
+    "sv-ttk",
+]
+
+[project.gui-scripts]
+framelab = "framelab.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

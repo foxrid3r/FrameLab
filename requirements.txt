@@ -1,4 +1,0 @@
-opencv-python
-Pillow
-imageio-ffmpeg
-sv-ttk
