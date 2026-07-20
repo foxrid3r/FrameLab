@@ -9,8 +9,6 @@ venv/
 env/
 
 # Build output
-build/
-dist/
 *.egg-info/
 
 # Test and tool caches
@@ -35,3 +33,10 @@ Frames/
 
 # Logs
 *.log
+
+# PyInstaller output
+build/
+dist/
+
+# Local installer output
+release/
