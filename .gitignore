@@ -40,3 +40,4 @@ dist/
 
 # Local installer output
 release/
+FrameLab-v*-win64.zip
