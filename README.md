@@ -13,7 +13,7 @@ FrameLab is a Windows application for frame-accurate video navigation, trimming,
 
 ## Installation
 
-Download the latest release from the project's **Releases** page and extract the ZIP file.
+Download the latest release from the project's [Releases](https://github.com/foxrid3r/FrameLab/releases) page and extract the ZIP file.
 
 Run:
 
