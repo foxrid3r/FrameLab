@@ -31,9 +31,8 @@ except ImportError:  # App still works without sv_ttk.
     sv_ttk = None
 
 
-# ============================================================
-# SETTINGS
-# ============================================================
+# Video/export defaults are centralized here so UI code and worker code use
+# the same encoding assumptions.
 DEFAULT_OUTPUT_SPEED = 0.1
 OUTPUT_FPS = 30.0
 PROXY_CRF = "23"
@@ -43,8 +42,8 @@ POLL_MS = 50
 
 
 
-class ToolTip:
-    """Simple tooltip for showing full text when a label is truncated."""
+class Tooltip:
+    """Show delayed help text in a small borderless popup."""
 
     def __init__(self, widget, text_getter, delay_ms=350):
         self.widget = widget
@@ -100,7 +99,13 @@ class ToolTip:
             self._tip = None
 
 
-class VideoTrimApp:
+class FrameLabApplication:
+    """Own the FrameLab interface and coordinate video-processing jobs.
+
+    Tkinter is not thread-safe, so proxy creation and exports run in worker
+    threads. Workers communicate with the main thread exclusively through
+    ``ui_queue``; ``_process_ui_events`` applies their updates to the UI.
+    """
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("FrameLab")
@@ -146,11 +151,9 @@ class VideoTrimApp:
         self._create_widgets()
         self._bind_events()
 
-        self.poll_ui_queue()
+        self._process_ui_events()
 
-    # ========================================================
-    # UI CREATION
-    # ========================================================
+    # -- Interface construction -------------------------------------------------
     def _configure_theme(self):
         if sv_ttk is not None:
             sv_ttk.use_dark_theme()
@@ -187,7 +190,7 @@ class VideoTrimApp:
 
         self.file_label = ttk.Label(self.toolbar, text="No video loaded", anchor="e")
         self.file_label.grid(row=0, column=10, sticky="e", padx=(20, 0))
-        self.file_path_tooltip = ToolTip(self.file_label, lambda: self.source_path or "No video loaded")
+        self.file_path_tooltip = Tooltip(self.file_label, lambda: self.source_path or "No video loaded")
 
         # ----- Main content: preview + right inspector -----
         self.main_pane = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
@@ -533,6 +536,7 @@ class VideoTrimApp:
         return "break"
 
     def _bind_events(self):
+        """Connect mouse, keyboard, and window events to application actions."""
         self.video_canvas.bind("<Configure>", self.on_video_resize)
         self.video_canvas.bind("<Button-1>", lambda e: self.root.focus_force())
         self.video_canvas.bind("<Button-3>", self.show_frame_context_menu)
@@ -563,9 +567,7 @@ class VideoTrimApp:
         elif key == "b":
             self.run_hotkey(self.browse_video)
 
-    # ========================================================
-    # UI HELPERS
-    # ========================================================
+    # -- Interface state and worker messages -----------------------------------
     def text_entry_has_focus(self):
         focused = self.root.focus_get()
         return isinstance(focused, (tk.Entry, ttk.Entry))
@@ -607,7 +609,8 @@ class VideoTrimApp:
         if percent is not None:
             self.progress_bar["value"] = max(0, min(100, float(percent)))
 
-    def poll_ui_queue(self):
+    def _process_ui_events(self):
+        """Apply messages from background workers without touching Tk off-thread."""
         while True:
             try:
                 item = self.ui_queue.get_nowait()
@@ -624,7 +627,7 @@ class VideoTrimApp:
                 messagebox.showerror(title, message)
             elif kind == "proxy_done":
                 self.set_progress("Opening proxy...", 100)
-                self.finish_load_video_after_proxy(item[1])
+                self._finish_loading_proxy(item[1])
             elif kind == "export_done":
                 _, output_path = item
                 self.set_busy(False, "Export complete")
@@ -636,11 +639,9 @@ class VideoTrimApp:
                 self.set_progress("Image export complete", 100)
                 messagebox.showinfo("Done", f"Saved {saved_count} image(s) to:\n{output_dir}")
 
-        self.root.after(POLL_MS, self.poll_ui_queue)
+        self.root.after(POLL_MS, self._process_ui_events)
 
-    # ========================================================
-    # BASIC UTILITY
-    # ========================================================
+    # -- Formatting, validation, and path helpers ------------------------------
     def frame_to_seconds(self, frame_num):
         return 0.0 if self.fps <= 0 else frame_num / self.fps
 
@@ -662,6 +663,7 @@ class VideoTrimApp:
 
     @staticmethod
     def get_unique_path(path):
+        """Return an unused path by appending a numeric suffix when necessary."""
         base, extension = os.path.splitext(path)
         candidate = path
         idx = 1
@@ -738,10 +740,9 @@ class VideoTrimApp:
             proposed += self.ext
         return os.path.join(self.folder, proposed)
 
-    # ========================================================
-    # VIDEO LOAD / PROXY
-    # ========================================================
+    # -- Video lifecycle and all-intra-frame proxy generation ------------------
     def clear_current_video(self, delete_proxy=None):
+        """Release the active video and restore the unloaded UI state."""
         if delete_proxy is None:
             delete_proxy = self.delete_proxy_on_close_var.get()
 
@@ -836,12 +837,13 @@ class VideoTrimApp:
         self.set_progress("Importing video / creating proxy...", 0)
 
         threading.Thread(
-            target=self.create_proxy_worker,
+            target=self._create_proxy,
             args=(self.source_path, self.proxy_path, duration_seconds),
             daemon=True,
         ).start()
 
-    def create_proxy_worker(self, path, proxy, duration_seconds):
+    def _create_proxy(self, path, proxy, duration_seconds):
+        """Create a seek-friendly proxy and post progress to ``ui_queue``."""
         if os.path.exists(proxy):
             self.ui_queue.put(("progress", "Using existing proxy", 100))
             self.ui_queue.put(("proxy_done", path))
@@ -894,10 +896,10 @@ class VideoTrimApp:
         except Exception as e:
             self.ui_queue.put(("error", "Proxy Error", f"Failed to create proxy:\n{e}"))
 
-    def finish_load_video_after_proxy(self, path):
+    def _finish_loading_proxy(self, path):
         if path != self.source_path:
             return
-        if not self.open_proxy():
+        if not self._open_proxy():
             self.clear_current_video(delete_proxy=self.delete_proxy_on_close_var.get())
             self.set_busy(False, "Idle")
             return
@@ -909,7 +911,7 @@ class VideoTrimApp:
         self.set_busy(False, "Import complete")
         self.set_progress("Import complete", 100)
 
-    def open_proxy(self):
+    def _open_proxy(self):
         self.cap = cv2.VideoCapture(self.proxy_path)
         if not self.cap.isOpened():
             messagebox.showerror("Error", "Could not open proxy video.")
@@ -925,10 +927,9 @@ class VideoTrimApp:
         self.slider.state(["!disabled"])
         return True
 
-    # ========================================================
-    # FRAME DISPLAY / NAVIGATION
-    # ========================================================
+    # -- Frame reading, display, and navigation --------------------------------
     def read_frame(self, frame_num):
+        """Seek to and decode one frame from the active proxy."""
         if self.cap is None:
             return None
         frame_num = max(0, min(frame_num, self.frame_count - 1))
@@ -1034,9 +1035,7 @@ class VideoTrimApp:
         self.stop_frame = self.current_frame
         self.update_mark_status()
 
-    # ========================================================
-    # COPY / SAVE FRAME
-    # ========================================================
+    # -- Single-frame copy and save actions ------------------------------------
     def get_current_frame_pil_image(self):
         if self.cap is None:
             return None
@@ -1166,9 +1165,7 @@ class VideoTrimApp:
             return
         self.frame_context_menu.tk_popup(event.x_root, event.y_root)
 
-    # ========================================================
-    # IMAGE EXPORT
-    # ========================================================
+    # -- Multi-frame image export ----------------------------------------------
     def populate_image_range_from_marks(self):
         if self.start_frame is None or self.stop_frame is None:
             messagebox.showerror("Missing Points", "Set both START and STOP frames first.")
@@ -1224,7 +1221,7 @@ class VideoTrimApp:
         self.set_busy(True, "Saving frame images...")
         self.set_progress("Saving frame images...", 0)
         threading.Thread(
-            target=self.image_export_worker,
+            target=self._export_frame_images,
             args=(
                 self.proxy_path,
                 self.fps,
@@ -1239,7 +1236,7 @@ class VideoTrimApp:
             daemon=True,
         ).start()
 
-    def image_export_worker(
+    def _export_frame_images(
         self,
         local_proxy_path,
         local_fps,
@@ -1251,6 +1248,7 @@ class VideoTrimApp:
         export_to_frames_subfolder,
         export_monochrome,
     ):
+        """Save the selected proxy frames and report progress to the UI thread."""
         export_cap = cv2.VideoCapture(local_proxy_path)
         if not export_cap.isOpened():
             self.ui_queue.put(("error", "Image Export Error", "Could not open proxy video for image export."))
@@ -1293,9 +1291,7 @@ class VideoTrimApp:
 
         self.ui_queue.put(("image_export_done", frames_folder, saved_count))
 
-    # ========================================================
-    # CLIP EXPORT
-    # ========================================================
+    # -- Clip export ------------------------------------------------------------
     def export_clip(self):
         if self.busy:
             messagebox.showinfo("Busy", "Please wait for the current operation to finish.")
@@ -1323,12 +1319,13 @@ class VideoTrimApp:
         self.set_busy(True, "Saving video...")
         self.set_progress("Saving video...", 0)
         threading.Thread(
-            target=self.export_worker,
+            target=self._export_clip,
             args=(output_path, output_speed, self.proxy_path, self.fps, self.start_frame, self.stop_frame),
             daemon=True,
         ).start()
 
-    def export_worker(self, output_path, output_speed, local_proxy_path, local_fps, local_start_frame, local_stop_frame):
+    def _export_clip(self, output_path, output_speed, local_proxy_path, local_fps, local_start_frame, local_stop_frame):
+        """Render a silent clip at the requested playback speed."""
         source_duration = (local_stop_frame - local_start_frame + 1) / local_fps
         output_duration = source_duration / output_speed
         output_frame_count = max(1, int(round(output_duration * OUTPUT_FPS)))
@@ -1387,9 +1384,7 @@ class VideoTrimApp:
 
         self.ui_queue.put(("export_done", output_path))
 
-    # ========================================================
-    # CLOSE
-    # ========================================================
+    # -- Shutdown ---------------------------------------------------------------
     def on_close(self):
         if self.busy:
             if not messagebox.askyesno("Operation Running", "An operation is still running. Close anyway?"):
@@ -1399,8 +1394,9 @@ class VideoTrimApp:
 
 
 def main():
+    """Launch the FrameLab desktop application."""
     root = tk.Tk()
-    VideoTrimApp(root)
+    FrameLabApplication(root)
     root.mainloop()
 
 
