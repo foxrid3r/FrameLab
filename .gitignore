@@ -37,6 +37,7 @@ Frames/
 # PyInstaller output
 build/
 dist/
+release-licenses/
 
 # Local installer output
 release/

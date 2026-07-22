@@ -5,7 +5,9 @@ Desktop application for frame-accurate video inspection, trimming,
 slow-motion export, and frame extraction.
 
 Requires:
-    pip install opencv-python pillow imageio-ffmpeg sv-ttk
+    pip install opencv-python pillow sv-ttk
+
+The ffmpeg executable must be installed separately and available on PATH.
 
 sv_ttk is optional. If it is not installed, the app falls back to the best
 available built-in ttk theme.
@@ -16,13 +18,13 @@ import io
 import os
 import queue
 import re
+import shutil
 import subprocess
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import cv2
-import imageio_ffmpeg
 from PIL import Image, ImageTk
 
 try:
@@ -133,7 +135,7 @@ class FrameLabApplication:
         self.busy = False
         self.output_filename_user_edited = False
         self.ui_queue = queue.Queue()
-        self.ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        self.ffmpeg_exe = None
 
         # Variables
         self.delete_proxy_on_close_var = tk.BooleanVar(value=False)
@@ -792,7 +794,7 @@ class FrameLabApplication:
         self.root.title("FrameLab")
 
     def get_source_duration_seconds(self, path):
-        temp_cap = cv2.VideoCapture(path)
+        temp_cap = cv2.VideoCapture(path, cv2.CAP_MSMF)
         try:
             src_fps = temp_cap.get(cv2.CAP_PROP_FPS)
             src_frames = int(temp_cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -819,6 +821,15 @@ class FrameLabApplication:
 
     def start_load_video(self, path):
         if self.busy:
+            return
+
+        self.ffmpeg_exe = shutil.which("ffmpeg")
+        if self.ffmpeg_exe is None:
+            messagebox.showerror(
+                "FFmpeg Required",
+                "FrameLab requires a separate FFmpeg installation with the libx264 encoder.\n\n"
+                "Install FFmpeg, add its bin directory to PATH, and restart FrameLab.",
+            )
             return
 
         self.clear_current_video(delete_proxy=self.delete_proxy_on_close_var.get())
@@ -912,7 +923,7 @@ class FrameLabApplication:
         self.set_progress("Import complete", 100)
 
     def _open_proxy(self):
-        self.cap = cv2.VideoCapture(self.proxy_path)
+        self.cap = cv2.VideoCapture(self.proxy_path, cv2.CAP_MSMF)
         if not self.cap.isOpened():
             messagebox.showerror("Error", "Could not open proxy video.")
             return False
@@ -1249,7 +1260,7 @@ class FrameLabApplication:
         export_monochrome,
     ):
         """Save the selected proxy frames and report progress to the UI thread."""
-        export_cap = cv2.VideoCapture(local_proxy_path)
+        export_cap = cv2.VideoCapture(local_proxy_path, cv2.CAP_MSMF)
         if not export_cap.isOpened():
             self.ui_queue.put(("error", "Image Export Error", "Could not open proxy video for image export."))
             return
@@ -1330,7 +1341,7 @@ class FrameLabApplication:
         output_duration = source_duration / output_speed
         output_frame_count = max(1, int(round(output_duration * OUTPUT_FPS)))
 
-        export_cap = cv2.VideoCapture(local_proxy_path)
+        export_cap = cv2.VideoCapture(local_proxy_path, cv2.CAP_MSMF)
         if not export_cap.isOpened():
             self.ui_queue.put(("error", "Export Error", "Could not open proxy video for export."))
             return
@@ -1338,7 +1349,7 @@ class FrameLabApplication:
         width = int(export_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(export_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(output_path, fourcc, OUTPUT_FPS, (width, height))
+        writer = cv2.VideoWriter(output_path, cv2.CAP_MSMF, fourcc, OUTPUT_FPS, (width, height))
 
         if not writer.isOpened():
             export_cap.release()
