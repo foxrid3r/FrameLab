@@ -794,7 +794,7 @@ class FrameLabApplication:
         self.root.title("FrameLab")
 
     def get_source_duration_seconds(self, path):
-        temp_cap = cv2.VideoCapture(path, cv2.CAP_MSMF)
+        temp_cap = cv2.VideoCapture(path)
         try:
             src_fps = temp_cap.get(cv2.CAP_PROP_FPS)
             src_frames = int(temp_cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -923,7 +923,7 @@ class FrameLabApplication:
         self.set_progress("Import complete", 100)
 
     def _open_proxy(self):
-        self.cap = cv2.VideoCapture(self.proxy_path, cv2.CAP_MSMF)
+        self.cap = cv2.VideoCapture(self.proxy_path)
         if not self.cap.isOpened():
             messagebox.showerror("Error", "Could not open proxy video.")
             return False
@@ -1260,7 +1260,7 @@ class FrameLabApplication:
         export_monochrome,
     ):
         """Save the selected proxy frames and report progress to the UI thread."""
-        export_cap = cv2.VideoCapture(local_proxy_path, cv2.CAP_MSMF)
+        export_cap = cv2.VideoCapture(local_proxy_path)
         if not export_cap.isOpened():
             self.ui_queue.put(("error", "Image Export Error", "Could not open proxy video for image export."))
             return
@@ -1341,7 +1341,7 @@ class FrameLabApplication:
         output_duration = source_duration / output_speed
         output_frame_count = max(1, int(round(output_duration * OUTPUT_FPS)))
 
-        export_cap = cv2.VideoCapture(local_proxy_path, cv2.CAP_MSMF)
+        export_cap = cv2.VideoCapture(local_proxy_path)
         if not export_cap.isOpened():
             self.ui_queue.put(("error", "Export Error", "Could not open proxy video for export."))
             return
@@ -1349,7 +1349,7 @@ class FrameLabApplication:
         width = int(export_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(export_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(output_path, cv2.CAP_MSMF, fourcc, OUTPUT_FPS, (width, height))
+        writer = cv2.VideoWriter(output_path, fourcc, OUTPUT_FPS, (width, height))
 
         if not writer.isOpened():
             export_cap.release()
