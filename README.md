@@ -105,16 +105,15 @@ By default, FrameLab keeps its generated proxy beside the source video and can p
 
 ## Requirements
 
-* Python 3.11
+* Python 3.14
 
 ## Create a Development Environment
 
 ```powershell
-py -3.11 -m venv .venv
+py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
-python -m pip install -e .
-python -m pip install pyinstaller
+python -m pip install -e ".[build]"
 ```
 
 Run from source:

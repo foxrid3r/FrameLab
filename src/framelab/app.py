@@ -793,17 +793,6 @@ class FrameLabApplication:
         self.update_info()
         self.root.title("FrameLab")
 
-    def get_source_duration_seconds(self, path):
-        temp_cap = cv2.VideoCapture(path)
-        try:
-            src_fps = temp_cap.get(cv2.CAP_PROP_FPS)
-            src_frames = int(temp_cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            if src_fps and src_fps > 0 and src_frames > 0:
-                return src_frames / src_fps
-        finally:
-            temp_cap.release()
-        return None
-
     def browse_video(self):
         if self.busy:
             messagebox.showinfo("Busy", "Please wait for the current operation to finish.")
@@ -843,17 +832,16 @@ class FrameLabApplication:
         self.file_label.config(text=f"Loading: {self.filename}")
         self.root.title(f"FrameLab - Loading {self.filename}")
 
-        duration_seconds = self.get_source_duration_seconds(self.source_path)
         self.set_busy(True, "Importing video / creating proxy...")
         self.set_progress("Importing video / creating proxy...", 0)
 
         threading.Thread(
             target=self._create_proxy,
-            args=(self.source_path, self.proxy_path, duration_seconds),
+            args=(self.source_path, self.proxy_path),
             daemon=True,
         ).start()
 
-    def _create_proxy(self, path, proxy, duration_seconds):
+    def _create_proxy(self, path, proxy):
         """Create a seek-friendly proxy and post progress to ``ui_queue``."""
         if os.path.exists(proxy):
             self.ui_queue.put(("progress", "Using existing proxy", 100))
@@ -863,6 +851,8 @@ class FrameLabApplication:
         cmd_proxy = [
             self.ffmpeg_exe,
             "-y",
+            "-progress", "pipe:2",
+            "-nostats",
             "-i", path,
             "-an",
             "-c:v", "libx264",
@@ -880,15 +870,23 @@ class FrameLabApplication:
                 text=True,
                 universal_newlines=True,
                 errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
 
-            time_re = re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
-            if duration_seconds is None or duration_seconds <= 0:
-                self.ui_queue.put(("progress", "Importing video / creating proxy...", 0))
+            timestamp_re = re.compile(r"(?:Duration: |time=)(\d+):(\d+):(\d+(?:\.\d+)?)")
+            duration_seconds = None
 
             for line in process.stderr:
+                match = timestamp_re.search(line)
+                if match and line.lstrip().startswith("Duration:"):
+                    hours = int(match.group(1))
+                    minutes = int(match.group(2))
+                    seconds = float(match.group(3))
+                    duration_seconds = hours * 3600 + minutes * 60 + seconds
+                    continue
+
                 if duration_seconds and duration_seconds > 0:
-                    match = time_re.search(line)
+                    match = timestamp_re.search(line)
                     if match:
                         hours = int(match.group(1))
                         minutes = int(match.group(2))
