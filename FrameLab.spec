@@ -22,19 +22,6 @@ a = Analysis(
     optimize=0,
 )
 
-# FrameLab requires users to install FFmpeg separately. OpenCV's Windows wheel
-# includes an optional FFmpeg video-I/O plugin, so omit it and use the native
-# Media Foundation backend explicitly in the application.
-a.binaries = [
-    entry for entry in a.binaries
-    if 'opencv_videoio_ffmpeg' not in entry[0].lower()
-    and 'opencv_videoio_ffmpeg' not in entry[1].lower()
-]
-a.datas = [
-    entry for entry in a.datas
-    if 'opencv_videoio_ffmpeg' not in entry[0].lower()
-    and 'opencv_videoio_ffmpeg' not in entry[1].lower()
-]
 pyz = PYZ(a.pure)
 
 exe = EXE(

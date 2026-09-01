@@ -43,6 +43,11 @@ PREVIEW_MAX_UPSCALE = 1.0      # 1.0 = never enlarge beyond source resolution
 POLL_MS = 50
 
 
+def open_video_capture(path):
+    """Open a video with OpenCV's FFmpeg backend for responsive seeking."""
+    return cv2.VideoCapture(path, cv2.CAP_FFMPEG)
+
+
 
 class Tooltip:
     """Show delayed help text in a small borderless popup."""
@@ -921,7 +926,7 @@ class FrameLabApplication:
         self.set_progress("Import complete", 100)
 
     def _open_proxy(self):
-        self.cap = cv2.VideoCapture(self.proxy_path)
+        self.cap = open_video_capture(self.proxy_path)
         if not self.cap.isOpened():
             messagebox.showerror("Error", "Could not open proxy video.")
             return False
@@ -1258,7 +1263,7 @@ class FrameLabApplication:
         export_monochrome,
     ):
         """Save the selected proxy frames and report progress to the UI thread."""
-        export_cap = cv2.VideoCapture(local_proxy_path)
+        export_cap = open_video_capture(local_proxy_path)
         if not export_cap.isOpened():
             self.ui_queue.put(("error", "Image Export Error", "Could not open proxy video for image export."))
             return
@@ -1339,7 +1344,7 @@ class FrameLabApplication:
         output_duration = source_duration / output_speed
         output_frame_count = max(1, int(round(output_duration * OUTPUT_FPS)))
 
-        export_cap = cv2.VideoCapture(local_proxy_path)
+        export_cap = open_video_capture(local_proxy_path)
         if not export_cap.isOpened():
             self.ui_queue.put(("error", "Export Error", "Could not open proxy video for export."))
             return
