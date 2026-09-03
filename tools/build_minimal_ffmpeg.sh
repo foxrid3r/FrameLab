@@ -107,7 +107,9 @@ popd
     echo "  --chroma-format=420"
     echo
     echo "FFmpeg configure arguments:"
-    printf '  %q\n' "${FFMPEG_CONFIGURE[@]}"
+    for argument in "${FFMPEG_CONFIGURE[@]}"; do
+        printf '  %q\n' "${argument//${PREFIX}/BUILD_PREFIX}"
+    done
 } > "${OUTPUT}/BUILD-INFO.txt"
 
 git -C "${SOURCE_ROOT}/ffmpeg" archive \

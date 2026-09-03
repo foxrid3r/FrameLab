@@ -13,12 +13,12 @@ x264 configure arguments:
   --chroma-format=420
 
 FFmpeg configure arguments:
-  --prefix=/c/Users/FoXRi/source/Python/FrameLab/build/ffmpeg-minimal/prefix
+  --prefix=BUILD_PREFIX
   --arch=x86_64
   --target-os=mingw32
   --pkg-config-flags=--static
-  --extra-cflags=-I/c/Users/FoXRi/source/Python/FrameLab/build/ffmpeg-minimal/prefix/include
-  --extra-ldflags=-L/c/Users/FoXRi/source/Python/FrameLab/build/ffmpeg-minimal/prefix/lib\ -static
+  --extra-cflags=-IBUILD_PREFIX/include
+  --extra-ldflags=-LBUILD_PREFIX/lib\ -static
   --enable-gpl
   --enable-libx264
   --enable-static
