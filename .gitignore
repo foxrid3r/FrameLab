@@ -38,12 +38,12 @@ Frames/
 benchmark-results/
 
 # PyInstaller output
-build/
-dist/
-release-licenses/
+/build/
+/dist/
+/release-licenses/
 
 # Local installer output
-release/
+/release/
 FrameLab-v*-win64.zip
 
 # Backups
