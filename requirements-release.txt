@@ -1,11 +1,10 @@
 altgraph==0.17.5
--e git+https://github.com/foxrid3r/FrameLab.git@54f3c5f2aa39e4c7a7073d4690380f87a03ef639#egg=framelab
-numpy==2.4.6
+numpy==2.5.2
 opencv-python==5.0.0.93
-packaging==26.2
+packaging==26.3
 pefile==2024.8.26
 pillow==12.3.0
-pyinstaller==6.21.0
-pyinstaller-hooks-contrib==2026.6
+pyinstaller==6.22.2
+pyinstaller-hooks-contrib==2026.7
 pywin32-ctypes==0.2.3
 sv_ttk==2.6.1

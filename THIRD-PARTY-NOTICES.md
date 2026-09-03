@@ -15,7 +15,7 @@ license texts.
 | CPython | Python Software Foundation License | Python runtime and standard library |
 | Tcl/Tk | Tcl/Tk license | GUI runtime bundled by PyInstaller |
 | opencv-python packaging | MIT | Python wheel packaging |
-| OpenCV | Apache License 2.0 | The optional OpenCV FFmpeg video-I/O plugin is excluded from the release |
+| OpenCV | Apache License 2.0 | The wheel includes its LGPL FFmpeg video-I/O plugin for OpenCV decoding and encoding |
 | NumPy | BSD 3-Clause | Runtime dependency of OpenCV |
 | Pillow | MIT-CMU | Image processing |
 | sv-ttk | MIT | Tk theme |
@@ -25,12 +25,15 @@ This list is informational. Always use the license files generated from the
 actual release environment because dependencies and their bundled libraries can
 change between versions.
 
-## Separately installed FFmpeg
+## Bundled FFmpeg executable
 
-FrameLab does not distribute FFmpeg. Users install it separately and FrameLab
-invokes the `ffmpeg` executable found on the system `PATH`. That installation
-must provide the `libx264` encoder. FFmpeg and its enabled libraries remain
-subject to the terms supplied by the user's chosen FFmpeg distributor.
+FrameLab distributes a separate, statically linked FFmpeg executable built with
+the `libx264` encoder. The executable is licensed under the GNU General Public
+License version 2 or later. Its build information and the FFmpeg and x264
+license texts are included under `licenses\ffmpeg` in the release. The exact
+source revisions and reproducible build recipe are recorded in
+`tools/build_minimal_ffmpeg.sh`; corresponding source archives must accompany
+published binary releases or be made available in accordance with the GPL.
 
 ## Patents
 

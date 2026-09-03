@@ -22,21 +22,13 @@ FrameLab.exe
 ```
 
 No Python installation is required.
-
-FrameLab requires a separate [FFmpeg](https://ffmpeg.org/download.html)
-installation that includes the `libx264` encoder. Add FFmpeg's `bin` directory
-to the Windows `PATH`, then restart FrameLab. Verify the installation with:
-
-```powershell
-ffmpeg -version
-ffmpeg -hide_banner -encoders | Select-String libx264
-```
+FFmpeg with the `libx264` encoder is bundled with FrameLab, so a separate
+FFmpeg installation is not required.
 
 ## System Requirements
 
 * Windows 10 or Windows 11
 * 64-bit operating system
-* FFmpeg with `libx264`, available on `PATH`
 
 ## Documentation
 
@@ -130,8 +122,8 @@ Create a standalone executable:
 .\build.ps1
 ```
 
-The build collects licenses and version information from the exact environment
-under `dist\FrameLab\licenses`. FFmpeg is not included in the release. See
+The build bundles the pinned FFmpeg executable from `vendor\ffmpeg` and
+collects licenses and version information under `dist\FrameLab\licenses`. See
 [Third-Party Notices](THIRD-PARTY-NOTICES.md) for release compliance details.
 
 The packaged application will be generated in:
@@ -145,6 +137,12 @@ Run the packaged version:
 ```powershell
 .\dist\FrameLab\FrameLab.exe
 ```
+
+## License
+
+FrameLab is free software licensed under the GNU General Public License,
+version 3. See [LICENSE](LICENSE). The release also contains separately
+identified licenses and notices for bundled third-party components.
 
 ## Project Structure
 

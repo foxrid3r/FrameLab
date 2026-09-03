@@ -34,6 +34,9 @@ Frames/
 # Logs
 *.log
 
+# Local proxy benchmarks
+benchmark-results/
+
 # PyInstaller output
 build/
 dist/

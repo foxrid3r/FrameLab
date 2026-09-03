@@ -7,7 +7,8 @@ slow-motion export, and frame extraction.
 Requires:
     pip install opencv-python pillow sv-ttk
 
-The ffmpeg executable must be installed separately and available on PATH.
+FrameLab uses the bundled FFmpeg executable when it is available and falls
+back to an ffmpeg executable on PATH for development environments.
 
 sv_ttk is optional. If it is not installed, the app falls back to the best
 available built-in ttk theme.
@@ -20,8 +21,10 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import cv2
@@ -46,6 +49,27 @@ POLL_MS = 50
 def open_video_capture(path):
     """Open a video with OpenCV's FFmpeg backend for responsive seeking."""
     return cv2.VideoCapture(path, cv2.CAP_FFMPEG)
+
+
+def find_ffmpeg_executable():
+    """Return FrameLab's bundled FFmpeg, falling back to the system PATH."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        bundle_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+        candidates.extend(
+            (
+                bundle_root / "ffmpeg" / "ffmpeg.exe",
+                Path(sys.executable).resolve().parent / "ffmpeg" / "ffmpeg.exe",
+            )
+        )
+    else:
+        project_root = Path(__file__).resolve().parents[2]
+        candidates.append(project_root / "vendor" / "ffmpeg" / "ffmpeg.exe")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return shutil.which("ffmpeg")
 
 
 
@@ -817,12 +841,12 @@ class FrameLabApplication:
         if self.busy:
             return
 
-        self.ffmpeg_exe = shutil.which("ffmpeg")
+        self.ffmpeg_exe = find_ffmpeg_executable()
         if self.ffmpeg_exe is None:
             messagebox.showerror(
                 "FFmpeg Required",
-                "FrameLab requires a separate FFmpeg installation with the libx264 encoder.\n\n"
-                "Install FFmpeg, add its bin directory to PATH, and restart FrameLab.",
+                "FrameLab's bundled FFmpeg executable could not be found.\n\n"
+                "Reinstall FrameLab or provide an FFmpeg installation with libx264 on PATH.",
             )
             return
 

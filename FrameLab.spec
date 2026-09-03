@@ -1,8 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('release-licenses', 'licenses')]
-binaries = []
+datas = [
+    ('release-licenses', 'licenses'),
+    ('LICENSE', 'licenses'),
+    ('vendor\\ffmpeg\\BUILD-INFO.txt', 'licenses\\ffmpeg'),
+    ('vendor\\ffmpeg\\FFmpeg-COPYING.GPLv2.txt', 'licenses\\ffmpeg'),
+    ('vendor\\ffmpeg\\x264-COPYING.txt', 'licenses\\ffmpeg'),
+]
+binaries = [('vendor\\ffmpeg\\ffmpeg.exe', 'ffmpeg')]
 hiddenimports = []
 tmp_ret = collect_all('sv_ttk')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]

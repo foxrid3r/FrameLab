@@ -1,0 +1,41 @@
+FrameLab minimal FFmpeg build
+FFmpeg revision: 1c2c67c0b9f7f66ab32c19dcf7f227bcd290aa4c (tag n8.1.2)
+FFmpeg commit: 38b88335f99e76ed89ff3c93f877fdefce736c13
+x264 revision: b35605ace3ddf7c1a5d67a2eb553f034aef41d55
+x264 commit: b35605ace3ddf7c1a5d67a2eb553f034aef41d55
+Toolchain: gcc.exe (Rev3, Built by MSYS2 project) 16.2.0
+
+x264 configure arguments:
+  --enable-static
+  --disable-cli
+  --disable-opencl
+  --bit-depth=8
+  --chroma-format=420
+
+FFmpeg configure arguments:
+  --prefix=/c/Users/FoXRi/source/Python/FrameLab/build/ffmpeg-minimal/prefix
+  --arch=x86_64
+  --target-os=mingw32
+  --pkg-config-flags=--static
+  --extra-cflags=-I/c/Users/FoXRi/source/Python/FrameLab/build/ffmpeg-minimal/prefix/include
+  --extra-ldflags=-L/c/Users/FoXRi/source/Python/FrameLab/build/ffmpeg-minimal/prefix/lib\ -static
+  --enable-gpl
+  --enable-libx264
+  --enable-static
+  --disable-shared
+  --disable-autodetect
+  --disable-everything
+  --disable-doc
+  --disable-debug
+  --disable-network
+  --enable-small
+  --enable-ffmpeg
+  --disable-ffprobe
+  --enable-protocol=file\,pipe
+  --enable-demuxer=mov\,avi\,matroska\,asf
+  --enable-decoder=h264\,hevc\,mjpeg\,mpeg4\,mpeg2video\,vc1\,wmv1\,wmv2\,wmv3
+  --enable-parser=h264\,hevc\,mjpeg\,mpeg4video\,mpegvideo\,vc1
+  --enable-encoder=libx264
+  --enable-muxer=mp4
+  --enable-filter=buffer\,buffersink\,format\,scale\,null
+  --enable-swscale
