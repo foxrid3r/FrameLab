@@ -1170,7 +1170,7 @@ class FrameLabApplication:
 
         safe_name = self.sanitize_filename_part(self.name or "video")
         milliseconds = int(round(self.frame_to_seconds(self.current_frame) * 1000))
-        output_name = f"{safe_name}_frame_{self.current_frame:06d}_{milliseconds:06d}ms.bmp"
+        output_name = f"{safe_name}_frame_{self.current_frame:06d}_{milliseconds:08d}ms.bmp"
 
         # Select the output folder using the checkbox.
         if self.image_to_frames_subfolder_var.get():
@@ -1307,7 +1307,7 @@ class FrameLabApplication:
                     raise RuntimeError(f"Could not read frame {frame_num}.")
 
                 milliseconds = int(round((frame_num / local_fps if local_fps > 0 else 0.0) * 1000))
-                output_name = f"{safe_name}_frame_{frame_num:06d}_{milliseconds}ms.bmp"
+                output_name = f"{safe_name}_frame_{frame_num:06d}_{milliseconds:08d}ms.bmp"
                 output_path = self.get_unique_path(os.path.join(frames_folder, output_name))
 
                 if export_monochrome:
