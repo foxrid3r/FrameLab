@@ -1149,6 +1149,12 @@ class FrameLabApplication:
         rect = self.video_canvas.create_rectangle(2, 2, w - 2, h - 2, outline=color, width=thickness)
         self.root.after(duration_ms, lambda: self.video_canvas.delete(rect))
 
+    def get_frame_filename(self, base_name, frame_num):
+        safe_name = self.sanitize_filename_part(base_name or "video")
+        milliseconds = int(round(self.frame_to_seconds(frame_num) * 1000))
+        output_name = f"{safe_name}_frame_{frame_num:06d}_{milliseconds:08d}ms.bmp"
+        return output_name
+
     def save_current_frame_bitmap(self):
         """
         Save the currently displayed frame as a BMP image.
@@ -1168,9 +1174,7 @@ class FrameLabApplication:
             messagebox.showerror("Save Frame", "Could not read the current frame.")
             return
 
-        safe_name = self.sanitize_filename_part(self.name or "video")
-        milliseconds = int(round(self.frame_to_seconds(self.current_frame) * 1000))
-        output_name = f"{safe_name}_frame_{self.current_frame:06d}_{milliseconds:08d}ms.bmp"
+        output_name = self.get_frame_filename(self.name, self.current_frame)
 
         # Select the output folder using the checkbox.
         if self.image_to_frames_subfolder_var.get():
@@ -1262,7 +1266,6 @@ class FrameLabApplication:
             target=self._export_frame_images,
             args=(
                 self.proxy_path,
-                self.fps,
                 local_start_frame,
                 local_stop_frame,
                 local_step,
@@ -1277,7 +1280,6 @@ class FrameLabApplication:
     def _export_frame_images(
         self,
         local_proxy_path,
-        local_fps,
         local_start_frame,
         local_stop_frame,
         local_step,
@@ -1292,7 +1294,6 @@ class FrameLabApplication:
             self.ui_queue.put(("error", "Image Export Error", "Could not open proxy video for image export."))
             return
 
-        safe_name = self.sanitize_filename_part(local_name or "video")
         frame_numbers = list(range(local_start_frame, local_stop_frame + 1, local_step))
         total = len(frame_numbers)
         saved_count = 0
@@ -1306,8 +1307,7 @@ class FrameLabApplication:
                 if not ret:
                     raise RuntimeError(f"Could not read frame {frame_num}.")
 
-                milliseconds = int(round((frame_num / local_fps if local_fps > 0 else 0.0) * 1000))
-                output_name = f"{safe_name}_frame_{frame_num:06d}_{milliseconds:08d}ms.bmp"
+                output_name = self.get_frame_filename(local_name, frame_num)
                 output_path = self.get_unique_path(os.path.join(frames_folder, output_name))
 
                 if export_monochrome:
