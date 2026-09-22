@@ -36,8 +36,12 @@ create slow-motion output. Exported clips use 30 FPS and contain no audio.
 
 Open **Frame Images** and enter the first frame, last frame, and step interval.
 **Use START/STOP** fills the range from the current markers. Enable **Save to
-Frames subfolder** to group the images, or **Monochrome** for grayscale BMP
-output.
+subfolder** to group the images, or **Monochrome** for grayscale BMP
+output. Set **Basename** to choose the filename prefix; it defaults to the video
+filename without its extension whenever a video is opened. A blank basename
+uses the video name. With **Save to subfolder** enabled, edit the adjacent
+field to choose a subfolder name (default: `Frames`). These settings apply to
+both **Export Images** and **Save Frame BMP**.
 
 ![Frame Images controls](screenshots/frame-image-export-controls.png)
 

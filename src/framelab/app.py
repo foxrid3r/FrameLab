@@ -142,6 +142,7 @@ class FrameLabApplication:
         self.root.title("FrameLab")
         self.root.geometry("1500x900")
         self.root.minsize(1120, 680)
+        self.root.state("zoomed")
 
         # Video/source state
         self.source_path = None
@@ -175,6 +176,8 @@ class FrameLabApplication:
         self.image_step_var = tk.StringVar(value="1")
         self.image_monochrome_var = tk.BooleanVar(value=True)
         self.image_to_frames_subfolder_var = tk.BooleanVar(value=True)
+        self.image_basename_var = tk.StringVar(value="")
+        self.image_subfolder_var = tk.StringVar(value="Frames")
         self.current_frame_var = tk.StringVar(value="0")
         self._updating_slider = False
 
@@ -390,121 +393,75 @@ class FrameLabApplication:
         self.export_button.grid(row=1, column=3, sticky="e", padx=(12, 0), pady=(10, 0))
 
     def _create_images_tab(self):
-        # Small numeric fields stay compact and left-justified; the remaining
-        # space is left blank rather than making Start/Stop/Step oversized.
-        self.images_tab.columnconfigure(8, weight=1)
+        self.images_tab.columnconfigure(0, weight=1)
+        range_row = ttk.Frame(self.images_tab)
+        range_row.grid(row=0, column=0, sticky="ew")
+        range_row.columnconfigure(7, weight=1)
+        naming_row = ttk.Frame(self.images_tab)
+        naming_row.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        naming_row.columnconfigure(1, weight=3)
+        naming_row.columnconfigure(3, weight=2)
 
-        ttk.Label(self.images_tab, text="Start").grid(
-            row=0,
-            column=0,
-            sticky="w",
-            padx=(0, 6),
-        )
-
-        self.image_start_entry = ttk.Entry(
-            self.images_tab,
-            width=10,
-            textvariable=self.image_start_var,
-        )
-        self.image_start_entry.grid(
-            row=0,
-            column=1,
-            sticky="w",
-            padx=(0, 14),
-        )
-
-        ttk.Label(self.images_tab, text="Stop").grid(
-            row=0,
-            column=2,
-            sticky="w",
-            padx=(0, 6),
-        )
-
-        self.image_stop_entry = ttk.Entry(
-            self.images_tab,
-            width=10,
-            textvariable=self.image_stop_var,
-        )
-        self.image_stop_entry.grid(
-            row=0,
-            column=3,
-            sticky="w",
-            padx=(0, 14),
-        )
-
-        ttk.Label(self.images_tab, text="Step").grid(
-            row=0,
-            column=4,
-            sticky="w",
-            padx=(0, 6),
-        )
-
-        self.image_step_entry = ttk.Entry(
-            self.images_tab,
-            width=8,
-            textvariable=self.image_step_var,
-        )
-        self.image_step_entry.grid(
-            row=0,
-            column=5,
-            sticky="w",
-        )
+        for column, (label, variable, attribute, width) in enumerate((
+            ("Start", self.image_start_var, "image_start_entry", 10),
+            ("Stop", self.image_stop_var, "image_stop_entry", 10),
+            ("Step", self.image_step_var, "image_step_entry", 8),
+        )):
+            ttk.Label(range_row, text=label).grid(
+                row=0, column=column * 2, sticky="w", padx=(0, 6),
+            )
+            entry = ttk.Entry(range_row, width=width, textvariable=variable)
+            entry.grid(row=0, column=column * 2 + 1, sticky="w", padx=(0, 14))
+            setattr(self, attribute, entry)
 
         self.use_marked_range_button = ttk.Button(
-            self.images_tab,
-            text="Use START/STOP",
-            command=self.populate_image_range_from_marks,
+            range_row, text="Use START/STOP", command=self.populate_image_range_from_marks,
         )
-        self.use_marked_range_button.grid(
-            row=0,
-            column=6,
-            padx=(16, 6),
-            sticky="w",
+        self.use_marked_range_button.grid(row=0, column=6, sticky="w")
+        self.image_monochrome_checkbox = ttk.Checkbutton(
+            range_row, text="Monochrome", variable=self.image_monochrome_var,
         )
-
+        self.image_monochrome_checkbox.grid(row=0, column=8, padx=(16, 14), sticky="w")
         self.export_images_button = ttk.Button(
-            self.images_tab,
-            text="Export Images",
-            command=self.export_frame_images,
-            takefocus=False,
+            range_row, text="Export Images", command=self.export_frame_images, takefocus=False,
         )
-        self.export_images_button.grid(
-            row=0,
-            column=7,
-            padx=(6, 0),
-            sticky="w",
-        )
+        self.export_images_button.grid(row=0, column=9, sticky="e")
 
+        ttk.Label(naming_row, text="Basename").grid(
+            row=0, column=0, sticky="w", padx=(0, 6),
+        )
+        self.image_basename_entry = ttk.Entry(
+            naming_row, textvariable=self.image_basename_var, width=24,
+        )
+        self.image_basename_entry.grid(row=0, column=1, sticky="ew")
         self.image_to_frames_subfolder_checkbox = ttk.Checkbutton(
-            self.images_tab,
-            text="Save to Frames subfolder",
-            variable=self.image_to_frames_subfolder_var,
+            naming_row, text="Save to subfolder", variable=self.image_to_frames_subfolder_var,
+            command=self.update_image_subfolder_state,
         )
         self.image_to_frames_subfolder_checkbox.grid(
-            row=1,
-            column=0,
-            columnspan=3,
-            sticky="w",
-            pady=(10, 0),
+            row=0, column=2, sticky="w", padx=(16, 6),
         )
-
-        self.image_monochrome_checkbox = ttk.Checkbutton(
-            self.images_tab,
-            text="Monochrome",
-            variable=self.image_monochrome_var,
+        ttk.Style(self.root).map(
+            "Subfolder.TEntry", foreground=[("disabled", "#808080")],
         )
-        self.image_monochrome_checkbox.grid(
-            row=1,
-            column=3,
-            columnspan=3,
-            sticky="w",
-            pady=(10, 0),
+        self.image_subfolder_entry = ttk.Entry(
+            naming_row, textvariable=self.image_subfolder_var, width=18,
+            style="Subfolder.TEntry",
         )
+        self.image_subfolder_entry.grid(row=0, column=3, sticky="ew")
+        self.image_subfolder_entry.bind(
+            "<<ThemeChanged>>",
+            lambda event: self.image_subfolder_entry.after_idle(self.update_image_subfolder_state),
+            add="+",
+        )
+        self.update_image_subfolder_state()
 
         for entry in (
             self.image_start_entry,
             self.image_stop_entry,
             self.image_step_entry,
+            self.image_basename_entry,
+            self.image_subfolder_entry,
         ):
             entry.bind(
                 "<Escape>",
@@ -623,8 +580,10 @@ class FrameLabApplication:
             self.set_stop_button,
             self.image_to_frames_subfolder_checkbox,
             self.image_monochrome_checkbox,
+            self.image_basename_entry,
         ):
             widget.state([state])
+        self.update_image_subfolder_state()
 
         if self.cap is not None and not value:
             self.slider.state(["!disabled"])
@@ -813,6 +772,7 @@ class FrameLabApplication:
         )
         self.file_label.config(text="No video loaded")
         self.output_filename_var.set("")
+        self.image_basename_var.set("")
         self.image_start_var.set("")
         self.image_stop_var.set("")
         self.image_step_var.set("1")
@@ -854,6 +814,7 @@ class FrameLabApplication:
         self.source_path = path
         self.folder, self.filename = os.path.split(self.source_path)
         self.name, self.ext = os.path.splitext(self.filename)
+        self.image_basename_var.set(self.name)
         self.proxy_path = os.path.join(self.folder, f"{self.name}_proxy_all_i.mp4")
 
         self.output_filename_user_edited = False
@@ -1149,6 +1110,35 @@ class FrameLabApplication:
         rect = self.video_canvas.create_rectangle(2, 2, w - 2, h - 2, outline=color, width=thickness)
         self.root.after(duration_ms, lambda: self.video_canvas.delete(rect))
 
+    def update_image_subfolder_state(self):
+        enabled = self.image_to_frames_subfolder_var.get() and not self.busy
+        self.image_subfolder_entry.state(["!disabled" if enabled else "disabled"])
+        # Sun Valley's tk_setPalette can set a widget foreground that overrides
+        # the style map. Update that option as well, including after theme changes.
+        foreground = ttk.Style(self.root).lookup("TEntry", "foreground", ("!disabled",))
+        self.image_subfolder_entry.configure(foreground=foreground if enabled else "#808080")
+        if not enabled:
+            self.image_subfolder_entry.selection_clear()
+
+    def get_image_output_settings(self):
+        base_name = self.image_basename_var.get().strip() or self.name or "video"
+        output_dir = self.folder
+        if self.image_to_frames_subfolder_var.get():
+            subfolder = self.image_subfolder_var.get().strip()
+            reserved = {"CON", "PRN", "AUX", "NUL"}
+            reserved.update(f"{prefix}{n}" for prefix in ("COM", "LPT") for n in "123456789¹²³")
+            if (
+                not subfolder or subfolder.endswith((".", " "))
+                or any(ch in '<>:"/\\|?*' or ord(ch) < 32 for ch in subfolder)
+                or subfolder.split(".")[0].upper() in reserved
+            ):
+                messagebox.showerror(
+                    "Invalid Subfolder", "Enter a valid single subfolder name, such as Frames."
+                )
+                return None
+            output_dir = os.path.join(output_dir, subfolder)
+        return base_name, output_dir
+
     def get_frame_filename(self, base_name, frame_num):
         safe_name = self.sanitize_filename_part(base_name or "video")
         milliseconds = int(round(self.frame_to_seconds(frame_num) * 1000))
@@ -1159,7 +1149,7 @@ class FrameLabApplication:
         """
         Save the currently displayed frame as a BMP image.
 
-        The "Save to Frames subfolder" checkbox controls whether the image
+        The "Save to subfolder" checkbox controls whether the image
         is saved beside the source video or in a Frames subfolder.
 
         The "Monochrome" checkbox controls whether the image is saved as
@@ -1174,22 +1164,15 @@ class FrameLabApplication:
             messagebox.showerror("Save Frame", "Could not read the current frame.")
             return
 
-        output_name = self.get_frame_filename(self.name, self.current_frame)
-
-        # Select the output folder using the checkbox.
-        if self.image_to_frames_subfolder_var.get():
-            output_dir = os.path.join(self.folder, "Frames")
-        else:
-            output_dir = self.folder
-
-        # Create the Frames folder when needed.
-        os.makedirs(output_dir, exist_ok=True)
-
-        output_path = self.get_unique_path(
-            os.path.join(output_dir, output_name)
-        )
+        settings = self.get_image_output_settings()
+        if settings is None:
+            return
+        base_name, output_dir = settings
+        output_name = self.get_frame_filename(base_name, self.current_frame)
 
         try:
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = self.get_unique_path(os.path.join(output_dir, output_name))
             # Select monochrome or color using the checkbox.
             if self.image_monochrome_var.get():
                 pil_image.convert("L").save(output_path, "BMP")
@@ -1253,6 +1236,10 @@ class FrameLabApplication:
         image_range = self.get_image_export_range()
         if image_range is None:
             return
+        settings = self.get_image_output_settings()
+        if settings is None:
+            return
+        base_name, output_dir = settings
 
         local_start_frame, local_stop_frame, local_step = image_range
         total = len(range(local_start_frame, local_stop_frame + 1, local_step))
@@ -1269,9 +1256,8 @@ class FrameLabApplication:
                 local_start_frame,
                 local_stop_frame,
                 local_step,
-                self.folder,
-                self.name,
-                self.image_to_frames_subfolder_var.get(),
+                output_dir,
+                base_name,
                 self.image_monochrome_var.get(),
             ),
             daemon=True,
@@ -1285,7 +1271,6 @@ class FrameLabApplication:
         local_step,
         local_folder,
         local_name,
-        export_to_frames_subfolder,
         export_monochrome,
     ):
         """Save the selected proxy frames and report progress to the UI thread."""
@@ -1297,10 +1282,10 @@ class FrameLabApplication:
         frame_numbers = list(range(local_start_frame, local_stop_frame + 1, local_step))
         total = len(frame_numbers)
         saved_count = 0
-        frames_folder = os.path.join(local_folder, "Frames") if export_to_frames_subfolder else local_folder
-        os.makedirs(frames_folder, exist_ok=True)
+        frames_folder = local_folder
 
         try:
+            os.makedirs(frames_folder, exist_ok=True)
             for idx, frame_num in enumerate(frame_numbers, start=1):
                 export_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
                 ret, frame = export_cap.read()
