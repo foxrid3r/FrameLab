@@ -1152,7 +1152,7 @@ class FrameLabApplication:
     def get_frame_filename(self, base_name, frame_num):
         safe_name = self.sanitize_filename_part(base_name or "video")
         milliseconds = int(round(self.frame_to_seconds(frame_num) * 1000))
-        output_name = f"{safe_name}_frame_{frame_num:06d}_{milliseconds:08d}ms.bmp"
+        output_name = f"{safe_name}_frame{frame_num:06d}_{milliseconds:08d}ms.bmp"
         return output_name
 
     def save_current_frame_bitmap(self):
