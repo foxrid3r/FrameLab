@@ -7,7 +7,7 @@ if (-not (Test-Path -LiteralPath $python)) {
     throw "Missing .venv. Create it with Python 3.14 and install the build dependencies first."
 }
 
-& $python -c "import sys; assert sys.version_info[:2] == (3, 14), f'FrameLab releases require Python 3.14, found {sys.version.split()[0]}'; import tkinter; tkinter.Tcl()"
+& $python -c "import sys; assert sys.version_info[:2] == (3, 14), f'FrameLab releases require Python 3.14, found {sys.version.split()[0]}'; from PySide6.QtWidgets import QApplication"
 
 & $python (Join-Path $repoRoot "tools\collect_release_licenses.py") `
     --output (Join-Path $repoRoot "release-licenses")

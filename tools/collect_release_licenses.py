@@ -6,7 +6,6 @@ import argparse
 import importlib.metadata
 import shutil
 import sys
-import zipfile
 from pathlib import Path
 
 
@@ -14,7 +13,12 @@ PACKAGES = (
     "opencv-python",
     "numpy",
     "Pillow",
-    "sv-ttk",
+    "PySide6",
+    "PySide6-Essentials",
+    "PySide6-Addons",
+    "PySide6-Pdf",
+    "PySide6-WebEngine",
+    "shiboken6",
     "pyinstaller",
 )
 NOTICE_NAMES = ("license", "copying", "notice", "authors")
@@ -52,35 +56,6 @@ def copy_first_existing(candidates: tuple[Path, ...], destination: Path, label: 
     raise RuntimeError(f"Could not locate the {label} license in this Python installation")
 
 
-def copy_tcl_tk_licenses(base: Path, output: Path) -> None:
-    unpacked_candidates = (
-        base / "tcl" / "tcl8.6" / "license.terms",
-        base / "tcl" / "tcl9.0" / "license.terms",
-        base / "tcl" / "tk8.6" / "license.terms",
-        base / "tcl" / "tk9.0" / "license.terms",
-    )
-    for candidate in unpacked_candidates:
-        if candidate.is_file():
-            shutil.copy2(candidate, output / "Tcl-Tk-license.terms")
-            return
-
-    archive_specs = (
-        ("libtcl*.zip", "tcl_library/license.terms", "Tcl-license.terms"),
-        ("libtk*.zip", "tk_library/license.terms", "Tk-license.terms"),
-    )
-    copied = 0
-    for archive_pattern, member, destination_name in archive_specs:
-        archive = next((base / "tcl").glob(archive_pattern), None)
-        if archive is None:
-            continue
-        with zipfile.ZipFile(archive) as bundle:
-            (output / destination_name).write_bytes(bundle.read(member))
-        copied += 1
-
-    if copied != len(archive_specs):
-        raise RuntimeError("Could not locate the Tcl/Tk licenses in this Python installation")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
@@ -108,7 +83,6 @@ def main() -> int:
         output / "CPython-LICENSE.txt",
         "CPython",
     )
-    copy_tcl_tk_licenses(base, output)
 
     shutil.copy2(Path(__file__).parents[1] / "THIRD-PARTY-NOTICES.md", output / "THIRD-PARTY-NOTICES.md")
     (output / "PACKAGE-VERSIONS.txt").write_text("\n".join(versions) + "\n", encoding="utf-8")

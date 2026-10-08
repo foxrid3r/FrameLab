@@ -39,6 +39,11 @@ instructions.
 
 ## Development
 
+The `experiment/pyside6-port` branch uses a native PySide6 GUI with the same
+video navigation, flags, FPS overrides, and export workflows. Install with
+`python -m pip install -e ".[build]"`, then run `python -m framelab`.
+Published v0.1.6 downloads retain the original Tkinter GUI.
+
 Instructions for setting up a development environment, producing reproducible
 releases, and rebuilding the bundled FFmpeg executable are in
 [Building FrameLab](docs/BUILDING.md).

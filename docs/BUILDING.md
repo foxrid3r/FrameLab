@@ -18,6 +18,18 @@ Run FrameLab from source:
 python -m framelab
 ```
 
+This branch uses the native PySide6 (Qt Widgets) interface. Installing the
+project also installs PySide6; Tcl/Tk and sv-ttk are no longer required.
+The published v0.1.6 release still uses the original Tkinter interface.
+
+Run the GUI regression checks without opening a window:
+
+```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
+python -m unittest discover -s tests -v
+Remove-Item Env:QT_QPA_PLATFORM
+```
+
 When running from source, FrameLab uses `vendor\ffmpeg\ffmpeg.exe` when it is
 available and otherwise looks for FFmpeg on `PATH`.
 

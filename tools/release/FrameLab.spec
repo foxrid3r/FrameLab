@@ -1,7 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 
-from PyInstaller.utils.hooks import collect_all
 
 repo_root = os.path.abspath(os.path.join(SPECPATH, '..', '..'))
 
@@ -14,10 +13,6 @@ datas = [
 ]
 binaries = [(os.path.join(repo_root, 'vendor', 'ffmpeg', 'ffmpeg.exe'), 'ffmpeg')]
 hiddenimports = []
-tmp_ret = collect_all('sv_ttk')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-
-
 a = Analysis(
     [os.path.join(repo_root, 'src', 'framelab', '__main__.py')],
     pathex=[],
@@ -27,7 +22,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=["tkinter", "sv_ttk", "PyQt5", "PyQt6", "PySide2"],
     noarchive=False,
     optimize=0,
 )

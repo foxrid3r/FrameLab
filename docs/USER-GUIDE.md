@@ -32,8 +32,9 @@ in the description field. Select a flag to jump to its frame. **Copy** copies
 the table for pasting into Excel, and **Delete** removes selected flags.
 Use **Import…** and **Export…** to load or save timestamp files.
 
-The bottom pane initially fits the Flags controls. Drag the divider above
-the timeline to adjust its height.
+The bottom pane fits the selected tab, expanding for Flags and shrinking for
+the other tabs. Drag the divider above the timeline to adjust its height;
+each tab remembers your adjusted height until you close the app.
 
 ## Export a clip
 

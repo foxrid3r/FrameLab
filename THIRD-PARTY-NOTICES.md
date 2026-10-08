@@ -13,12 +13,12 @@ license texts.
 | Component | Expected license | Notes |
 | --- | --- | --- |
 | CPython | Python Software Foundation License | Python runtime and standard library |
-| Tcl/Tk | Tcl/Tk license | GUI runtime bundled by PyInstaller |
+| PySide6 / Shiboken | LGPL-3.0 / GPL-3.0 / commercial | Python bindings for the Qt GUI runtime |
+| Qt 6 | LGPL-3.0 / GPL-3.0 / commercial; component licenses vary | GUI libraries and platform plugins bundled by PyInstaller |
 | opencv-python packaging | MIT | Python wheel packaging |
 | OpenCV | Apache License 2.0 | The wheel includes its LGPL FFmpeg video-I/O plugin for OpenCV decoding and encoding |
 | NumPy | BSD 3-Clause | Runtime dependency of OpenCV |
 | Pillow | MIT-CMU | Image processing |
-| sv-ttk | MIT | Tk theme |
 | PyInstaller bootloader | GPL-2.0 with bootloader exception | The exception permits distribution of the generated application under a license of the application's author’s choice |
 
 This list is informational. Always use the license files generated from the
