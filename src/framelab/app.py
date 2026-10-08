@@ -14,6 +14,7 @@ sv_ttk is optional. If it is not installed, the app falls back to the best
 available built-in ttk theme.
 """
 
+import csv
 import ctypes
 import io
 import os
@@ -23,12 +24,14 @@ import shutil
 import subprocess
 import sys
 import threading
+import zipfile
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import cv2
-from PIL import Image, ImageTk
+from framelab import spreadsheet
+from PIL import Image, ImageDraw, ImageTk
 
 try:
     import sv_ttk
@@ -40,10 +43,16 @@ except ImportError:  # App still works without sv_ttk.
 # the same encoding assumptions.
 DEFAULT_OUTPUT_SPEED = 0.1
 OUTPUT_FPS = 30.0
+FLAG_STRIP_HEIGHT = 20
+SLIDER_END_PAD = 10  # approximate ttk.Scale thumb half-width
+# Flag colors cycle in this order as timestamps are added.
+TIMESTAMP_COLORS = ("#ef4444", "#f59e0b", "#22c55e", "#06b6d4", "#3b82f6", "#a855f7", "#ec4899", "#eab308")
 PROXY_CRF = "23"
 PROXY_PRESET = "ultrafast"
 PREVIEW_MAX_UPSCALE = 1.0      # 1.0 = never enlarge beyond source resolution
 POLL_MS = 50
+MAX_PIXEL_SCALE = 16.0  # most screen pixels per source pixel when zoomed
+ZOOM_STEP = 1.25  # zoom multiplier per mouse-wheel notch
 
 
 def open_video_capture(path):
@@ -154,12 +163,28 @@ class FrameLabApplication:
 
         self.cap = None
         self.fps = 0.0
+        self.original_fps = 0.0
         self.frame_count = 0
         self.current_frame = 0
         self.start_frame = None
         self.stop_frame = None
         self.current_tk_image = None
         self.resize_job = None
+        self.timestamps = []  # list of {"frame": int, "description": str}
+        self._flag_icons = {}
+
+        # Preview zoom/pan. The view is the crop of the frame starting at
+        # (view_x, view_y) in normalized frame coordinates and spanning 1/zoom of
+        # each axis. The decoded frame is cached so zooming never re-decodes.
+        self.zoom = 1.0
+        self.view_x = 0.0
+        self.view_y = 0.0
+        self._frame_bgr = None
+        self._preview_box = None  # (x, y, width, height) of the drawn image on the canvas
+        self._redraw_job = None
+        self._pan_anchor = None
+        self._scale = 1.0  # screen pixels per source pixel in the last draw
+        self.timestamp_sort = ("num", False)  # (column id, descending)
 
         # UI/work state
         self.busy = False
@@ -179,6 +204,7 @@ class FrameLabApplication:
         self.image_basename_var = tk.StringVar(value="")
         self.image_subfolder_var = tk.StringVar(value="Frames")
         self.current_frame_var = tk.StringVar(value="0")
+        self.timestamp_description_var = tk.StringVar(value="")
         self._updating_slider = False
 
         self._configure_theme()
@@ -227,8 +253,15 @@ class FrameLabApplication:
         self.file_path_tooltip = Tooltip(self.file_label, lambda: self.source_path or "No video loaded")
 
         # ----- Main content: preview + right inspector -----
-        self.main_pane = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
-        self.main_pane.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        # A vertical pane lets the user drag the sash to trade video size for
+        # control-panel (e.g. timestamp table) height.
+        self.vertical_pane = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
+        self.vertical_pane.grid(row=1, column=0, sticky="nsew")
+        self.main_holder = ttk.Frame(self.vertical_pane, padding=(10, 0, 10, 6))
+        self.main_holder.columnconfigure(0, weight=1)
+        self.main_holder.rowconfigure(0, weight=1)
+        self.main_pane = ttk.PanedWindow(self.main_holder, orient=tk.HORIZONTAL)
+        self.main_pane.grid(row=0, column=0, sticky="nsew")
 
         self.preview_shell = ttk.Frame(self.main_pane, padding=0)
         self.preview_shell.columnconfigure(0, weight=1)
@@ -273,6 +306,17 @@ class FrameLabApplication:
         self.info_card.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         self.info_label = ttk.Label(self.info_card, text="No video loaded", justify=tk.LEFT, wraplength=255)
         self.info_label.pack(fill=tk.X)
+        fps_buttons = ttk.Frame(self.info_card)
+        fps_buttons.pack(anchor="w", pady=(8, 0))
+        self.set_fps_button = ttk.Button(
+            fps_buttons, text="Set Frame Rate…", command=self.set_frame_rate,
+        )
+        self.set_fps_button.grid(row=0, column=0, padx=(0, 6))
+        self.reset_fps_button = ttk.Button(
+            fps_buttons, text="Reset", command=self.reset_frame_rate,
+            state="disabled",
+        )
+        self.reset_fps_button.grid(row=0, column=1)
 
         self.marks_card = ttk.LabelFrame(self.inspector, text="Marked Range", padding=10)
         self.marks_card.grid(row=1, column=0, sticky="ew", pady=8)
@@ -305,27 +349,38 @@ class FrameLabApplication:
         self.inspector.rowconfigure(9, weight=1)
 
         # ----- Bottom modern control tabs -----
-        self.bottom = ttk.Frame(self.root, padding=(10, 0, 10, 10))
-        self.bottom.grid(row=2, column=0, sticky="ew")
+        self.bottom = ttk.Frame(self.vertical_pane, padding=(10, 0, 10, 10))
         self.bottom.columnconfigure(0, weight=1)
+        self.bottom.rowconfigure(2, weight=1)
+        self.vertical_pane.add(self.main_holder, weight=1)
+        self.vertical_pane.add(self.bottom, weight=0)
+
+        # Timestamp flags are drawn on a thin strip directly above the slider.
+        self.flag_canvas = tk.Canvas(self.bottom, height=FLAG_STRIP_HEIGHT, highlightthickness=0, bd=0, bg="#1f1f1f")
+        self.flag_canvas.grid(row=0, column=0, sticky="ew")
+        self.flag_canvas.bind("<Configure>", lambda e: self.draw_flags())
 
         self.slider = ttk.Scale(self.bottom, from_=0, to=1, command=self.slider_changed)
-        self.slider.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        self.slider.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         self.slider.state(["disabled"])
 
         self.notebook = ttk.Notebook(self.bottom)
-        self.notebook.grid(row=1, column=0, sticky="ew")
+        self.notebook.grid(row=2, column=0, sticky="nsew")
 
         self.nav_tab = ttk.Frame(self.notebook, padding=10)
+        self.timestamps_tab = ttk.Frame(self.notebook, padding=10)
         self.clip_tab = ttk.Frame(self.notebook, padding=10)
         self.images_tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.nav_tab, text="Navigate")
+        self.notebook.add(self.timestamps_tab, text="Flags")
         self.notebook.add(self.clip_tab, text="Clip Export")
         self.notebook.add(self.images_tab, text="Frame Images")
 
         self._create_nav_tab()
+        self._create_timestamps_tab()
         self._create_clip_tab()
         self._create_images_tab()
+        self.vertical_pane.bind("<Map>", self._initialize_bottom_height)
 
         # ----- Context menu -----
         self.frame_context_menu = tk.Menu(self.root, tearoff=0)
@@ -354,6 +409,112 @@ class FrameLabApplication:
         self.frame_entry.grid(row=0, column=9, sticky="e")
         self.frame_entry.bind("<Return>", self.jump_to_frame_from_entry)
         self.frame_entry.bind("<Escape>", lambda e: self.root.focus_force())
+
+    def _create_timestamps_tab(self):
+        tab = self.timestamps_tab
+        tab.columnconfigure(1, weight=1)
+        tab.rowconfigure(0, weight=1)
+
+        # Left: entry panel for recording a timestamp at the current frame.
+        entry_panel = ttk.Frame(tab)
+        entry_panel.grid(row=0, column=0, sticky="nsw", padx=(0, 16))
+        entry_panel.columnconfigure(0, weight=1)
+        ttk.Label(entry_panel, text="Description", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, sticky="w")
+        self.timestamp_entry = ttk.Entry(entry_panel, width=34, textvariable=self.timestamp_description_var)
+        self.timestamp_entry.grid(row=1, column=0, sticky="ew", pady=(4, 8))
+        self.timestamp_entry.bind("<Return>", lambda e: self.add_timestamp())
+        self.timestamp_entry.bind("<Escape>", lambda e: self.root.focus_force())
+        self.add_timestamp_button = ttk.Button(
+            entry_panel, text="Add Flag (F)", command=self.add_timestamp, style="Accent.TButton",
+        )
+        self.add_timestamp_button.grid(row=2, column=0, sticky="ew")
+
+        # Center: the timestamp table. Colored dots in the tree column match
+        # the flags drawn above the slider.
+        style = ttk.Style(self.root)
+        style.configure("Timestamps.Treeview", rowheight=26)
+        style.configure("Timestamps.Treeview.Heading", font=("Segoe UI", 9, "bold"), padding=(8, 5))
+        table = ttk.Frame(tab)
+        table.grid(row=0, column=1, sticky="nsew")
+        table.columnconfigure(0, weight=1)
+        table.rowconfigure(0, weight=1)
+        self.timestamp_tree = ttk.Treeview(
+            table, columns=("num", "time", "frame", "description"), show="tree headings",
+            height=2, selectmode="extended", style="Timestamps.Treeview",
+        )
+        self.timestamp_tree.heading(
+            "#0", text="Flag", anchor="center", command=lambda: self.sort_timestamps_by("#0"),
+        )
+        self.timestamp_tree.column("#0", width=56, minwidth=56, stretch=False, anchor="center")
+        for column, heading, width, anchor, stretch in (
+            ("num", "#", 50, "w", False),
+            ("time", "Time", 110, "w", False),
+            ("frame", "Frame", 90, "w", False),
+            ("description", "Description", 360, "w", True),
+        ):
+            self.timestamp_tree.heading(
+                column, text=heading, anchor=anchor, command=lambda c=column: self.sort_timestamps_by(c),
+            )
+            self.timestamp_tree.column(column, width=width, minwidth=width, stretch=stretch, anchor=anchor)
+        tree_scroll = ttk.Scrollbar(table, orient="vertical", command=self.timestamp_tree.yview)
+        self.timestamp_tree.configure(yscrollcommand=tree_scroll.set)
+        self.timestamp_tree.grid(row=0, column=0, sticky="nsew")
+        tree_scroll.grid(row=0, column=1, sticky="ns")
+        self.timestamp_tree.bind("<<TreeviewSelect>>", lambda e: self.jump_to_selected_timestamp())
+        self.timestamp_tree.bind("<Delete>", lambda e: self.delete_timestamp())
+        # The Treeview's built-in Left/Right handling moves the selection to the
+        # neighbouring row, which jumps to another timestamp. Step frames instead.
+        for sequence, delta in (
+            ("<Left>", -1), ("<Right>", 1),
+            ("<Shift-Left>", -10), ("<Shift-Right>", 10),
+            ("<Control-Left>", -100), ("<Control-Right>", 100),
+        ):
+            self.timestamp_tree.bind(
+                sequence,
+                lambda e, d=delta: (self.run_hotkey(lambda: self.jump_frames(d)), "break")[1],
+            )
+        self.timestamp_tree.bind("<Control-a>", self.select_all_timestamps)
+
+        # Right: actions that operate on the whole table or selection.
+        actions = ttk.Frame(tab)
+        actions.grid(row=0, column=2, sticky="ns", padx=(16, 0))
+        actions.columnconfigure(0, weight=1)
+        transfer = ttk.Frame(actions)
+        transfer.grid(row=0, column=0, sticky="ew")
+        transfer.columnconfigure((0, 1), weight=1)
+        self.import_timestamps_button = ttk.Button(
+            transfer, text="Import\u2026", command=self.import_timestamps, width=8)
+        self.import_timestamps_button.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self.export_timestamps_button = ttk.Button(
+            transfer, text="Export\u2026", command=self.export_timestamps, width=8)
+        self.export_timestamps_button.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+        selection_actions = ttk.Frame(actions)
+        selection_actions.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        selection_actions.columnconfigure((0, 1), weight=1)
+        self.delete_timestamp_button = ttk.Button(
+            selection_actions, text="Delete", command=self.delete_timestamp, width=8)
+        self.delete_timestamp_button.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self.copy_timestamps_button = ttk.Button(
+            selection_actions, text="Copy", command=self.copy_timestamps_to_clipboard, width=8)
+        self.copy_timestamps_button.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+
+    def _initialize_bottom_height(self, event):
+        """Fit the initial bottom pane to Flags, while keeping the sash adjustable."""
+        self.vertical_pane.unbind("<Map>")
+        self.root.after_idle(self._fit_bottom_to_flags)
+
+    def _fit_bottom_to_flags(self):
+        self.root.update_idletasks()
+        tallest_tab = max(
+            self.root.nametowidget(tab).winfo_reqheight() for tab in self.notebook.tabs()
+        )
+        # Retain the slider, flag strip, tab bar, borders, and padding; replace
+        # the tallest tab's requested height with the Flags tab's height.
+        height = self.bottom.winfo_reqheight() - tallest_tab + self.timestamps_tab.winfo_reqheight()
+        sash_height = self.bottom.winfo_y() - self.vertical_pane.sashpos(0)
+        self.vertical_pane.sashpos(
+            0, max(0, self.vertical_pane.winfo_height() - height - sash_height)
+        )
 
     def _create_clip_tab(self):
         # Compact two-row layout:
@@ -528,6 +689,10 @@ class FrameLabApplication:
         self.video_canvas.bind("<Configure>", self.on_video_resize)
         self.video_canvas.bind("<Button-1>", lambda e: self.root.focus_force())
         self.video_canvas.bind("<Button-3>", self.show_frame_context_menu)
+        self.video_canvas.bind("<MouseWheel>", self.on_video_mousewheel)
+        self.video_canvas.bind("<ButtonPress-1>", self.on_pan_start, add="+")
+        self.video_canvas.bind("<B1-Motion>", self.on_pan_drag)
+        self.video_canvas.bind("<Double-Button-1>", lambda e: self.reset_zoom())
 
         self.root.bind("<Left>", lambda e: self.run_hotkey(lambda: self.jump_frames(-1)))
         self.root.bind("<Right>", lambda e: self.run_hotkey(lambda: self.jump_frames(1)))
@@ -552,6 +717,8 @@ class FrameLabApplication:
             self.run_hotkey(self.set_stop)
         elif key == "q":
             self.run_hotkey(self.export_clip)
+        elif key == "f":
+            self.run_hotkey(self.add_timestamp)
         elif key == "b":
             self.run_hotkey(self.browse_video)
 
@@ -573,6 +740,12 @@ class FrameLabApplication:
             self.browse_button,
             self.copy_button,
             self.save_frame_button,
+            self.set_fps_button,
+            self.add_timestamp_button,
+            self.delete_timestamp_button,
+            self.copy_timestamps_button,
+            self.export_timestamps_button,
+            self.import_timestamps_button,
             self.export_button,
             self.export_images_button,
             self.use_marked_range_button,
@@ -584,6 +757,7 @@ class FrameLabApplication:
         ):
             widget.state([state])
         self.update_image_subfolder_state()
+        self.update_frame_rate_controls()
 
         if self.cap is not None and not value:
             self.slider.state(["!disabled"])
@@ -663,6 +837,7 @@ class FrameLabApplication:
         return candidate
 
     def update_info(self):
+        self.update_frame_rate_controls()
         if self.cap is None:
             self.info_label.config(text="No video loaded")
             self.current_frame_var.set("0")
@@ -676,9 +851,20 @@ class FrameLabApplication:
                 f"File:\n{self.filename}\n\n"
                 f"Current Frame:\n{self.current_frame} / {self.frame_count - 1}\n\n"
                 f"Current Time:\n{current_time} / {total_time}\n\n"
-                f"Source FPS:\n{self.fps:.3f}"
+                f"Source FPS:\n{self.original_fps:.3f}"
+                + (f"\n\nOverride FPS:\n{self.fps:.3f} (overridden)" if self.frame_rate_overridden() else "")
             )
         )
+
+    def frame_rate_overridden(self):
+        return self.original_fps > 0 and abs(self.fps - self.original_fps) > 1e-6
+
+    def update_frame_rate_controls(self):
+        enabled = self.cap is not None and not self.busy
+        self.set_fps_button.state(["!disabled" if enabled else "disabled"])
+        self.reset_fps_button.state([
+            "!disabled" if enabled and self.frame_rate_overridden() else "disabled"
+        ])
 
     def update_mark_status(self):
         start_text = (
@@ -753,11 +939,16 @@ class FrameLabApplication:
         self.name = None
         self.ext = None
         self.fps = 0.0
+        self.original_fps = 0.0
         self.frame_count = 0
         self.current_frame = 0
         self.start_frame = None
         self.stop_frame = None
         self.current_tk_image = None
+        self._frame_bgr = None
+        self._preview_box = None
+        self.zoom, self.view_x, self.view_y = 1.0, 0.0, 0.0
+        self.timestamps = []
         self.output_filename_user_edited = False
 
         self.video_canvas.delete("all")
@@ -780,6 +971,7 @@ class FrameLabApplication:
         self.slider.state(["disabled"])
         self.update_mark_status()
         self.update_info()
+        self.refresh_timestamps()
         self.root.title("FrameLab")
 
     def browse_video(self):
@@ -907,6 +1099,7 @@ class FrameLabApplication:
         self.root.title(f"FrameLab - {self.filename}")
         self.update_mark_status()
         self.show_frame(0)
+        self.draw_flags()
         self.set_busy(False, "Import complete")
         self.set_progress("Import complete", 100)
 
@@ -917,6 +1110,7 @@ class FrameLabApplication:
             return False
 
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        self.original_fps = self.fps
         self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if self.fps <= 0 or self.frame_count <= 0:
             messagebox.showerror("Error", "Could not read video FPS or frame count.")
@@ -925,6 +1119,343 @@ class FrameLabApplication:
         self.slider.configure(from_=0, to=self.frame_count - 1)
         self.slider.state(["!disabled"])
         return True
+
+    # -- Timestamps and slider flags -------------------------------------------
+    @staticmethod
+    def timestamp_color(index):
+        return TIMESTAMP_COLORS[index % len(TIMESTAMP_COLORS)]
+
+    def flag_icon(self, color):
+        """Return a cached anti-aliased colored dot used in the timestamp table."""
+        icon = self._flag_icons.get(color)
+        if icon is None:
+            size, scale = 14, 4
+            big = Image.new("RGBA", (size * scale, size * scale), (0, 0, 0, 0))
+            ImageDraw.Draw(big).ellipse((scale, scale, (size - 1) * scale, (size - 1) * scale), fill=color)
+            icon = ImageTk.PhotoImage(big.resize((size, size), Image.LANCZOS))
+            self._flag_icons[color] = icon
+        return icon
+
+    def add_timestamp(self):
+        if self.cap is None or self.busy:
+            return
+        self.timestamps.append({
+            "frame": self.current_frame,
+            "description": self.timestamp_description_var.get().strip(),
+        })
+        self.timestamp_description_var.set("")
+        self.refresh_timestamps()
+        self.timestamp_tree.see(str(len(self.timestamps) - 1))
+        self.root.focus_force()
+
+    def delete_timestamp(self):
+        selection = self.timestamp_tree.selection()
+        if not selection:
+            return
+        # Delete from the end so earlier indices stay valid.
+        for index in sorted((int(iid) for iid in selection), reverse=True):
+            del self.timestamps[index]
+        self.refresh_timestamps()
+
+    def select_all_timestamps(self, event=None):
+        self.timestamp_tree.selection_set(self.timestamp_tree.get_children())
+        return "break"
+
+    def jump_to_selected_timestamp(self):
+        selection = self.timestamp_tree.selection()
+        # Only a single selection jumps; Ctrl/Shift multi-selects leave the video where it is.
+        if len(selection) != 1 or self.cap is None or self.busy:
+            return
+        frame = self.timestamps[int(selection[0])]["frame"]
+        if frame != self.current_frame:
+            self.show_frame(frame)
+
+    def timestamp_rows(self, include_fps=False):
+        """Return a header row plus one [#, seconds, frame, description] row per timestamp.
+
+        Seconds are numeric (rounded to milliseconds) so Excel can calculate with them.
+        ``include_fps`` appends an FPS column so the frame rate travels with the file.
+        """
+        rows = [["#", "Time (s)", "Frame", "Description"] + (["FPS"] if include_fps else [])]
+        fps = round(self.fps, 3)
+        for index in self.timestamp_view_order():
+            entry = self.timestamps[index]
+            rows.append([
+                index + 1,
+                round(self.frame_to_seconds(entry["frame"]), 3),
+                entry["frame"],
+                entry["description"],
+            ] + ([fps] if include_fps else []))
+        return rows
+
+    def timestamp_text_rows(self, include_fps=False):
+        """Rows with the seconds column formatted to a fixed three decimals (text)."""
+        return [
+            [f"{value:.3f}" if column == 1 and row_index else value for column, value in enumerate(row)]
+            for row_index, row in enumerate(self.timestamp_rows(include_fps))
+        ]
+
+    def copy_timestamps_to_clipboard(self):
+        """Copy timestamps so they paste into Excel cells, seconds shown as 0.000."""
+        if not self.timestamps:
+            messagebox.showinfo("No Timestamps", "Add at least one timestamp first.")
+            return
+        try:
+            spreadsheet.set_windows_clipboard_table(self.timestamp_rows(), seconds_column=1)
+        except Exception:
+            # Fall back to plain tab-separated text through Tk.
+            buffer = io.StringIO()
+            csv.writer(buffer, delimiter="\t", lineterminator="\n").writerows(self.timestamp_text_rows())
+            self.root.clipboard_clear()
+            self.root.clipboard_append(buffer.getvalue())
+            self.root.update()  # keep the data on the clipboard after the call returns
+        self.progress_label.config(text=f"Copied {len(self.timestamps)} timestamps to clipboard")
+
+    def export_timestamps(self):
+        """Save timestamps as an Excel workbook (.xlsx) or CSV, chosen by file extension."""
+        if not self.timestamps:
+            messagebox.showinfo("No Timestamps", "Add at least one timestamp first.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export timestamps",
+            defaultextension=".xlsx",
+            initialdir=self.folder,
+            initialfile=f"{self.name}_timestamps.xlsx",
+            filetypes=[("Excel workbook", "*.xlsx"), ("CSV files", "*.csv")],
+        )
+        if not path:
+            return
+        try:
+            if path.lower().endswith(".csv"):
+                # utf-8-sig so Excel detects the encoding.
+                with open(path, "w", newline="", encoding="utf-8-sig") as handle:
+                    csv.writer(handle).writerows(self.timestamp_text_rows(include_fps=True))
+            else:
+                spreadsheet.write_xlsx(
+                    path, self.timestamp_rows(include_fps=True), seconds_column=1,
+                    column_widths=[6, 12, 10, 50, 8],
+                )
+        except OSError as e:
+            messagebox.showerror("Export Error", f"Could not write file:\n{e}")
+            return
+        self.progress_label.config(text=f"Exported timestamps: {os.path.basename(path)}")
+
+    @staticmethod
+    def parse_seconds(value):
+        """Parse seconds from a number, ``1.234``, ``mm:ss.mmm`` or ``h:mm:ss.mmm``; else None."""
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value or "").strip()
+        match = re.fullmatch(r"(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)", text)
+        if match:
+            hours, minutes, seconds = match.groups()
+            return int(hours or 0) * 3600 + int(minutes) * 60 + float(seconds)
+        try:
+            return float(text)
+        except ValueError:
+            return None
+
+    def timestamps_from_rows(self, rows):
+        """Convert spreadsheet rows to timestamp entries. Returns (entries, skipped_count, fps).
+
+        Uses the header row to find Frame / Time / Description / FPS columns
+        (falling back to FrameLab's export layout). A Frame value wins over
+        Time. ``fps`` is the frame rate stored in the file, or None. Times are
+        converted to frames at that rate when present, else at the current one.
+        """
+        rows = [row for row in rows if any(cell not in (None, "") for cell in row)]
+        if not rows:
+            raise ValueError("The file contains no rows.")
+        header = [str(cell or "").strip().lower() for cell in rows[0]]
+
+        def find(*prefixes):
+            for index, name in enumerate(header):
+                if name.startswith(prefixes):
+                    return index
+            return None
+
+        frame_col, time_col, desc_col = find("frame"), find("time"), find("desc", "note", "comment", "label")
+        fps_col = find("fps")
+        if frame_col is None and time_col is None:
+            if len(rows[0]) < 4:
+                raise ValueError("Could not find Time or Frame columns.")
+            time_col, frame_col, desc_col = 1, 2, 3  # headerless export layout
+            data_rows = rows
+        else:
+            data_rows = rows[1:]
+
+        def cell_of(row, index):
+            return row[index] if index is not None and index < len(row) else None
+
+        file_fps = None
+        for row in data_rows:
+            candidate = self.parse_seconds(cell_of(row, fps_col))
+            if candidate is not None and candidate > 0:
+                file_fps = candidate
+                break
+        fps = file_fps or self.fps
+
+        entries, skipped = [], 0
+        for row in data_rows:
+            def cell(index):
+                return cell_of(row, index)
+
+            frame = None
+            raw_frame = cell(frame_col)
+            if raw_frame not in (None, ""):
+                try:
+                    frame = int(round(float(raw_frame)))
+                except (TypeError, ValueError):
+                    frame = None
+            if frame is None:
+                seconds = self.parse_seconds(cell(time_col))
+                if seconds is not None:
+                    frame = round(seconds * fps)
+            if frame is None or not 0 <= frame < self.frame_count:
+                skipped += 1
+                continue
+            description = cell(desc_col)
+            entries.append({"frame": frame, "description": "" if description is None else str(description).strip()})
+        return entries, skipped, file_fps
+
+    def import_timestamps(self):
+        """Load timestamps from an .xlsx or .csv file (such as one exported by FrameLab)."""
+        if self.cap is None or self.busy:
+            messagebox.showinfo("Import Timestamps", "Load a video first so times can be mapped to frames.")
+            return
+        path = filedialog.askopenfilename(
+            title="Import timestamps",
+            initialdir=self.folder,
+            filetypes=[("Timestamp files", "*.xlsx *.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            if path.lower().endswith(".xlsx"):
+                rows = spreadsheet.read_xlsx(path)
+            else:
+                with open(path, newline="", encoding="utf-8-sig") as handle:
+                    sample = handle.read(4096)
+                    handle.seek(0)
+                    dialect = csv.Sniffer().sniff(sample, delimiters=",;\t") if sample else csv.excel
+                    rows = list(csv.reader(handle, dialect))
+            entries, skipped, file_fps = self.timestamps_from_rows(rows)
+        except (OSError, ValueError, csv.Error, KeyError, zipfile.BadZipFile) as e:
+            messagebox.showerror("Import Error", f"Could not import timestamps:\n{e}")
+            return
+        if not entries:
+            messagebox.showwarning("Import Timestamps", "No valid timestamps were found in the file.")
+            return
+
+        if self.timestamps:
+            choice = messagebox.askyesnocancel(
+                "Import Timestamps",
+                f"Replace the {len(self.timestamps)} existing timestamps?\n\n"
+                "Yes = replace    No = add to existing    Cancel = abort",
+            )
+            if choice is None:
+                return
+            if choice:
+                self.timestamps = []
+        self.timestamps.extend(entries)
+        notes = []
+        if file_fps is not None and abs(file_fps - self.fps) > 1e-6:
+            self.fps = file_fps
+            self.update_info()
+            self.update_mark_status()
+            notes.append(f"frame rate set to {file_fps:g} fps")
+        if skipped:
+            notes.append(f"{skipped} skipped")
+        self.refresh_timestamps()
+        note = f" ({', '.join(notes)})" if notes else ""
+        self.progress_label.config(text=f"Imported {len(entries)} timestamps{note}")
+
+    TIMESTAMP_HEADINGS = {"#0": "Flag", "num": "#", "time": "Time", "frame": "Frame", "description": "Description"}
+
+    def timestamp_view_order(self):
+        """Indices into ``self.timestamps`` in the order currently sorted for display."""
+        column, descending = self.timestamp_sort
+        keys = {
+            "#0": lambda i: i,
+            "num": lambda i: i,
+            "time": lambda i: (self.timestamps[i]["frame"], i),
+            "frame": lambda i: (self.timestamps[i]["frame"], i),
+            "description": lambda i: (self.timestamps[i]["description"].lower(), i),
+        }
+        return sorted(range(len(self.timestamps)), key=keys[column], reverse=descending)
+
+    def sort_timestamps_by(self, column):
+        """Sort by ``column``; clicking the active column again reverses the order."""
+        active, descending = self.timestamp_sort
+        self.timestamp_sort = (column, (not descending) if column == active else False)
+        self.refresh_timestamps()
+
+    def refresh_timestamps(self):
+        """Rebuild the timestamp table and slider flags from ``self.timestamps``."""
+        self.timestamp_tree.delete(*self.timestamp_tree.get_children())
+        for index in self.timestamp_view_order():
+            entry = self.timestamps[index]
+            self.timestamp_tree.insert(
+                "", "end", iid=str(index),
+                image=self.flag_icon(self.timestamp_color(index)),
+                values=(
+                    index + 1,
+                    self.format_time(self.frame_to_seconds(entry["frame"])),
+                    entry["frame"],
+                    entry["description"],
+                ),
+            )
+        active, descending = self.timestamp_sort
+        for column, heading in self.TIMESTAMP_HEADINGS.items():
+            arrow = (" ▼" if descending else " ▲") if column == active else ""
+            self.timestamp_tree.heading(column, text=heading + arrow)
+        self.draw_flags()
+
+    def draw_flags(self):
+        self.flag_canvas.delete("all")
+        if self.cap is None or self.frame_count < 2:
+            return
+        width = self.flag_canvas.winfo_width()
+        span = max(1, width - 2 * SLIDER_END_PAD)
+        for index, entry in enumerate(self.timestamps):
+            color = self.timestamp_color(index)
+            x = SLIDER_END_PAD + span * entry["frame"] / (self.frame_count - 1)
+            tag = f"flag{index}"
+            self.flag_canvas.create_line(x, 2, x, FLAG_STRIP_HEIGHT, fill=color, width=2, tags=(tag,))
+            self.flag_canvas.create_polygon(x, 2, x + 11, 6, x, 10, fill=color, outline=color, tags=(tag,))
+            self.flag_canvas.tag_bind(tag, "<Button-1>", lambda e, f=entry["frame"]: self.show_frame(f))
+
+    def set_frame_rate(self):
+        """Override the source frame rate used for time display and export timing.
+
+        Useful when container metadata (e.g. slow-motion capture rate) was lost.
+        """
+        if self.cap is None or self.busy:
+            return
+        value = simpledialog.askfloat(
+            "Set Frame Rate",
+            "Frame rate (FPS) of the source footage, e.g. 240 for iPhone slo-mo:\n\n"
+            "This overrides the FPS used for time display, timestamp times, and export timing.",
+            initialvalue=round(self.fps, 3),
+            minvalue=0.1,
+            maxvalue=10000.0,
+            parent=self.root,
+        )
+        if value is None:
+            return
+        self.fps = float(value)
+        self.update_info()
+        self.update_mark_status()
+        self.refresh_timestamps()
+
+    def reset_frame_rate(self):
+        """Restore the FPS read when this video was loaded."""
+        if self.cap is None or self.busy or not self.frame_rate_overridden():
+            return
+        self.fps = self.original_fps
+        self.update_info()
+        self.update_mark_status()
+        self.refresh_timestamps()
 
     # -- Frame reading, display, and navigation --------------------------------
     def read_frame(self, frame_num):
@@ -936,14 +1467,49 @@ class FrameLabApplication:
         ret, frame = self.cap.read()
         return frame if ret else None
 
-    def resize_frame_for_preview(self, frame):
-        h, w = frame.shape[:2]
+    def _view_geometry(self, frame_w, frame_h, zoom=None):
+        """Return ``(scale, crop_w, crop_h)`` for the preview at ``zoom``.
+
+        Zoom 1 fits the whole frame inside the canvas. Zooming in scales the
+        picture continuously (square pixels, no stretching). Once the picture
+        is bigger than the canvas on an axis, the view crops to the canvas
+        shape on that axis, so past the point where both axes overflow the
+        view fills the canvas edge to edge.
+        """
+        zoom = self.zoom if zoom is None else zoom
         available_w = max(self.video_canvas.winfo_width(), 1)
         available_h = max(self.video_canvas.winfo_height(), 1)
-        scale = min(available_w / w, available_h / h, PREVIEW_MAX_UPSCALE)
-        new_w = max(1, int(w * scale))
-        new_h = max(1, int(h * scale))
-        return cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        fit = min(available_w / frame_w, available_h / frame_h, PREVIEW_MAX_UPSCALE)
+        if zoom <= 1.0:
+            return fit, frame_w, frame_h
+        scale = fit * zoom
+        crop_w = min(frame_w, max(1, round(available_w / scale)))
+        crop_h = min(frame_h, max(1, round(available_h / scale)))
+        return scale, crop_w, crop_h
+
+    def _max_zoom(self, frame_w, frame_h):
+        available_w = max(self.video_canvas.winfo_width(), 1)
+        available_h = max(self.video_canvas.winfo_height(), 1)
+        fit = min(available_w / frame_w, available_h / frame_h, PREVIEW_MAX_UPSCALE)
+        return max(1.0, MAX_PIXEL_SCALE / fit)
+
+    def resize_frame_for_preview(self, frame):
+        """Crop ``frame`` to the zoomed view, then scale it for the canvas."""
+        h, w = frame.shape[:2]
+        scale, crop_w, crop_h = self._view_geometry(w, h)
+        self._scale = scale
+        if self.zoom > 1.0:
+            x0 = min(max(int(round(self.view_x * w)), 0), w - crop_w)
+            y0 = min(max(int(round(self.view_y * h)), 0), h - crop_h)
+            frame = frame[y0:y0 + crop_h, x0:x0 + crop_w]
+            new_w = min(max(1, round(crop_w * scale)), max(self.video_canvas.winfo_width(), 1))
+            new_h = min(max(1, round(crop_h * scale)), max(self.video_canvas.winfo_height(), 1))
+        else:
+            new_w = max(1, int(w * scale))
+            new_h = max(1, int(h * scale))
+        # Nearest-neighbor when magnifying keeps individual pixels crisp instead of blurred.
+        interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_NEAREST
+        return cv2.resize(frame, (new_w, new_h), interpolation=interpolation)
 
     def show_frame(self, frame_num):
         if self.cap is None:
@@ -955,15 +1521,8 @@ class FrameLabApplication:
             return
 
         self.current_frame = frame_num
-        preview = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        preview = self.resize_frame_for_preview(preview)
-        img = Image.fromarray(preview)
-        self.current_tk_image = ImageTk.PhotoImage(image=img)
-
-        self.video_canvas.delete("all")
-        x = self.video_canvas.winfo_width() // 2
-        y = self.video_canvas.winfo_height() // 2
-        self.video_canvas.create_image(x, y, image=self.current_tk_image, anchor=tk.CENTER)
+        self._frame_bgr = frame
+        self._draw_preview()
 
         # Updating a ttk.Scale programmatically fires its command callback on some
         # Tk builds. Guard this update so changing frames from buttons/hotkeys
@@ -975,6 +1534,101 @@ class FrameLabApplication:
             self._updating_slider = False
 
         self.update_info()
+
+    def _draw_preview(self):
+        """Render the cached frame at the current zoom/pan onto the canvas."""
+        if self._frame_bgr is None:
+            return
+        preview = self.resize_frame_for_preview(self._frame_bgr)
+        preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(preview)
+        self.current_tk_image = ImageTk.PhotoImage(image=img)
+
+        self.video_canvas.delete("all")
+        x = self.video_canvas.winfo_width() // 2
+        y = self.video_canvas.winfo_height() // 2
+        self.video_canvas.create_image(x, y, image=self.current_tk_image, anchor=tk.CENTER)
+        height, width = preview.shape[:2]
+        self._preview_box = (x - width / 2, y - height / 2, width, height)
+
+        if self.zoom > 1.0:
+            label = f"Zoom {self._scale * 100:.0f}%  •  drag to pan, double-click to reset"
+            self.video_canvas.create_text(13, 13, text=label, anchor="nw", fill="black", font=("Segoe UI", 10))
+            self.video_canvas.create_text(12, 12, text=label, anchor="nw", fill="#f3f3f3", font=("Segoe UI", 10))
+
+    # -- Preview zoom and pan ---------------------------------------------------
+    def _clamp_view(self):
+        """Keep the zoomed crop inside the frame."""
+        if self._frame_bgr is None:
+            return
+        h, w = self._frame_bgr.shape[:2]
+        _, crop_w, crop_h = self._view_geometry(w, h)
+        self.view_x = min(max(self.view_x, 0.0), 1.0 - crop_w / w)
+        self.view_y = min(max(self.view_y, 0.0), 1.0 - crop_h / h)
+
+    def _schedule_redraw(self):
+        """Coalesce rapid wheel/drag events into one redraw per idle cycle."""
+        if self._redraw_job is None:
+            self._redraw_job = self.root.after_idle(self._run_scheduled_redraw)
+
+    def _run_scheduled_redraw(self):
+        self._redraw_job = None
+        self._draw_preview()
+
+    def on_video_mousewheel(self, event):
+        if self._frame_bgr is None or self._preview_box is None:
+            return
+        notches = event.delta / 120.0
+        self.zoom_at(ZOOM_STEP ** notches, event.x, event.y)
+
+    def zoom_at(self, factor, canvas_x, canvas_y):
+        """Zoom by ``factor`` keeping the frame point under the cursor fixed."""
+        h, w = self._frame_bgr.shape[:2]
+        box_x, box_y, _, _ = self._preview_box
+        old = self.zoom
+        old_scale, _, _ = self._view_geometry(w, h, old)
+        # Source-pixel coordinates under the cursor before zooming.
+        point_x = self.view_x * w + (canvas_x - box_x) / old_scale
+        point_y = self.view_y * h + (canvas_y - box_y) / old_scale
+
+        new = min(max(old * factor, 1.0), self._max_zoom(w, h))
+        if new == old:
+            return
+        if new == 1.0:
+            self.reset_zoom()
+            return
+
+        new_scale, crop_w, crop_h = self._view_geometry(w, h, new)
+        available_w = max(self.video_canvas.winfo_width(), 1)
+        available_h = max(self.video_canvas.winfo_height(), 1)
+        # Where the image will start on the canvas (centered while it is smaller than the canvas).
+        new_box_x = max(0.0, (available_w - crop_w * new_scale) / 2)
+        new_box_y = max(0.0, (available_h - crop_h * new_scale) / 2)
+        self.zoom = new
+        self.view_x = (point_x - (canvas_x - new_box_x) / new_scale) / w
+        self.view_y = (point_y - (canvas_y - new_box_y) / new_scale) / h
+        self._clamp_view()
+        self._schedule_redraw()
+
+    def reset_zoom(self):
+        if self.zoom == 1.0 and self.view_x == 0.0 and self.view_y == 0.0:
+            return
+        self.zoom, self.view_x, self.view_y = 1.0, 0.0, 0.0
+        self._schedule_redraw()
+
+    def on_pan_start(self, event):
+        self._pan_anchor = (event.x, event.y)
+
+    def on_pan_drag(self, event):
+        if self.zoom <= 1.0 or self._pan_anchor is None or self._frame_bgr is None:
+            return
+        h, w = self._frame_bgr.shape[:2]
+        dx, dy = event.x - self._pan_anchor[0], event.y - self._pan_anchor[1]
+        self._pan_anchor = (event.x, event.y)
+        self.view_x -= dx / self._scale / w
+        self.view_y -= dy / self._scale / h
+        self._clamp_view()
+        self._schedule_redraw()
 
     def slider_changed(self, value):
         if self._updating_slider or self.cap is None or self.busy:
