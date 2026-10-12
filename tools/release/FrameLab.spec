@@ -19,13 +19,17 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=[],
+    hookspath=[os.path.join(SPECPATH, 'hooks')],
     hooksconfig={},
     runtime_hooks=[],
     excludes=["tkinter", "sv_ttk", "PyQt5", "PyQt6", "PySide2"],
     noarchive=False,
     optimize=0,
 )
+
+# FrameLab paints ordinary Widgets with QPainter and does not create OpenGL
+# contexts. Keep the platform plugins, but omit Qt's software OpenGL renderer.
+a.binaries = [entry for entry in a.binaries if os.path.basename(entry[0]).lower() != 'opengl32sw.dll']
 
 pyz = PYZ(a.pure)
 

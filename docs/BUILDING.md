@@ -58,6 +58,13 @@ To build the unpackaged application without creating release archives, run:
 
 The output is written to `dist\FrameLab\`.
 
+The release spec uses a local QtGui hook to omit the unused PDF image and
+virtual keyboard plugins, which otherwise bring in Qt PDF and Qt Quick/QML.
+It also omits the software OpenGL renderer: FrameLab uses raster-painted
+Widgets. Windows platform plugins, styles, and other image plugins remain
+bundled. Revisit these exclusions if the application adds PDF, virtual
+keyboard, or OpenGL features.
+
 ## Bundled FFmpeg
 
 Release builds bundle the pinned FFmpeg executable in `vendor\ffmpeg`. Its
