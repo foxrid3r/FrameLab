@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.metadata
 import shutil
 import sys
@@ -15,13 +16,19 @@ PACKAGES = (
     "Pillow",
     "PySide6",
     "PySide6-Essentials",
-    "PySide6-Addons",
-    "PySide6-Pdf",
-    "PySide6-WebEngine",
     "shiboken6",
     "pyinstaller",
 )
 NOTICE_NAMES = ("license", "copying", "notice", "authors")
+
+# Reviewed notices without a binary-redistribution notice requirement:
+# pythoncapi-compat (0BSD), libdivide (zlib; no headers shipped), SplitMix64 (CC0).
+# Match contents so a changed upstream license is collected for review.
+OPTIONAL_NUMPY_NOTICE_HASHES = {
+    "aea41976c720f91bd19725c16916a1ace40eb1ea42620d340e587a5de4bbcea0",
+    "d544761558b510866c21f7e8a2d5716fca76e0b98117e3b6b86314db7244d150",
+    "454ec7350e478e037061850b67395753b425b1cb0a34bbc26290b020bf89d763",
+}
 
 
 def safe_name(value: str) -> str:
@@ -33,16 +40,34 @@ def copy_distribution_notices(distribution_name: str, output: Path) -> tuple[str
     project_name = distribution.metadata.get("Name", distribution_name)
     version = distribution.version
     copied = 0
+    seen_contents: set[bytes] = set()
 
     for relative_file in distribution.files or ():
         basename = Path(str(relative_file)).name.lower()
-        if not any(basename.startswith(name) for name in NOTICE_NAMES):
+        if not any(basename.startswith(name) or f"_{name}" in basename for name in NOTICE_NAMES):
             continue
         source = Path(distribution.locate_file(relative_file))
         if not source.is_file():
             continue
-        destination_name = f"{safe_name(project_name)}-{safe_name(version)}-{safe_name(Path(str(relative_file)).name)}"
-        shutil.copy2(source, output / destination_name)
+        contents = source.read_bytes()
+        if distribution_name == "numpy" and hashlib.sha256(contents).hexdigest() in OPTIONAL_NUMPY_NOTICE_HASHES:
+            continue
+        if contents in seen_contents:
+            continue
+        seen_contents.add(contents)
+        if distribution_name == "numpy":
+            # Keep upstream component paths beneath one readable package folder.
+            parts = Path(str(relative_file)).parts
+            if "licenses" in parts:
+                parts = parts[parts.index("licenses") + 1:]
+            if parts[0] == "numpy":
+                parts = parts[1:]
+            destination = output / "numpy" / Path(*parts)
+        else:
+            destination_name = f"{safe_name(project_name)}-{safe_name(version)}-{safe_name(str(relative_file))}"
+            destination = output / destination_name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
         copied += 1
 
     return version, copied

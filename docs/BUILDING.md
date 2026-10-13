@@ -50,6 +50,14 @@ The packaging script builds the application and creates versioned application
 and corresponding-source archives under `release\`, together with SHA-256
 checksums.
 
+NumPy notices are grouped under `licenses/numpy`, preserving upstream component
+paths. The collector retains the wheel's main license (including OpenBLAS and
+LAPACK notices) and distinct component notices. For the binary-only application,
+it omits the reviewed pythoncapi-compat (0BSD), SplitMix64 (CC0), and libdivide
+(zlib) notices, whose terms do not require a notice with binary redistribution.
+These omissions match exact file hashes; changed license texts are retained.
+Revisit the libdivide omission if NumPy headers or sources are added to releases.
+
 To build the unpackaged application without creating release archives, run:
 
 ```powershell

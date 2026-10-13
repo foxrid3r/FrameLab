@@ -4,6 +4,7 @@ import io
 import os
 import queue
 import sys
+from pathlib import Path
 
 import cv2
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
@@ -229,6 +230,7 @@ class FrameLabApplication(QMainWindow, VideoOperations):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('FrameLab')
+        self.setWindowIcon(QIcon(str(Path(__file__).with_name('assets') / 'framelab.ico')))
         self.resize(1500, 900)
         self.setMinimumSize(1120, 680)
         self.source_path = self.proxy_path = self.folder = self.filename = self.name = self.ext = None
@@ -795,6 +797,7 @@ def configure_theme(application):
 def main():
     application = QApplication.instance() or QApplication(sys.argv)
     application.setApplicationName('FrameLab')
+    application.setWindowIcon(QIcon(str(Path(__file__).with_name('assets') / 'framelab.ico')))
     configure_theme(application)
     window = FrameLabApplication()
     window.showMaximized()

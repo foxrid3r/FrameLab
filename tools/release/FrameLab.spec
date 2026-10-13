@@ -5,6 +5,7 @@ import os
 repo_root = os.path.abspath(os.path.join(SPECPATH, '..', '..'))
 
 datas = [
+    (os.path.join(repo_root, 'src', 'framelab', 'assets'), 'framelab/assets'),
     (os.path.join(repo_root, 'release-licenses'), 'licenses'),
     (os.path.join(repo_root, 'LICENSE'), 'licenses'),
     (os.path.join(repo_root, 'vendor', 'ffmpeg', 'BUILD-INFO.txt'), 'licenses\\ffmpeg'),
@@ -39,6 +40,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='FrameLab',
+    icon=os.path.join(repo_root, 'src', 'framelab', 'assets', 'framelab.ico'),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
