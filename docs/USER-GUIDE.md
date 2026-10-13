@@ -32,6 +32,13 @@ in the description field. Select a flag to jump to its frame. **Copy** copies
 the table for pasting into Excel, and **Delete** removes selected flags.
 Use **Import…** and **Export…** to load or save timestamp files.
 
+![Flags controls with descriptions, timestamps, and frame numbers](screenshots/frame-flags-controls.png)
+
+The flag table includes each flag's number, time, frame, description, and
+frame rate. Copy it into Excel to review the marked events in a spreadsheet.
+
+![Flag data in Excel with time, frame, description, and FPS columns](screenshots/exported-flags.png)
+
 The bottom pane fits the selected tab, expanding for Flags and shrinking for
 the other tabs. Drag the divider above the timeline to adjust its height;
 each tab remembers your adjusted height until you close the app.
